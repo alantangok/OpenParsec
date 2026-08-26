@@ -9,6 +9,7 @@ struct SettingsHandler {
 	@AppStorage("cursorMode") public static var cursorMode: CursorMode = .touchpad
 	@AppStorage("cursorScale") public static var cursorScale: Double = 0.5
 	@AppStorage("mouseSensitivity") public static var mouseSensitivity: Double = 1.0
+	@AppStorage("naturalScrolling") public static var naturalScrolling: Bool = true
 	@AppStorage("noOverlay") public static var noOverlay: Bool = false
 	@AppStorage("hideStatusBar") public static var hideStatusBar: Bool = true
 	@AppStorage("rightClickPosition") public static var rightClickPosition: RightClickPosition = .firstFinger

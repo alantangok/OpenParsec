@@ -9,6 +9,7 @@ class GamepadController {
 	private(set) var mice = Set<GCMouse>()
     // private var panRecognizer: UIPanGestureRecognizer!
     weak var delegate: InputManagerDelegate?
+	var pointerInputStatusProvider: (() -> PointerInputStatus?)?
 
     public func viewDidLoad() {
 
@@ -96,16 +97,39 @@ class GamepadController {
 				guard ParsecBackgroundManager.shared.hasActiveConnection else { return }
 				CParsec.sendMouseClickMessage(MOUSE_MIDDLE, pressed)
 				}
-			mouse.mouseInput?.mouseMovedHandler={(_: GCMouseInput, v: Float, v2: Float) in
+			mouse.mouseInput?.mouseMovedHandler={[weak self] (_: GCMouseInput, v: Float, v2: Float) in
+				guard let status = self?.pointerInputStatus() else {
+					return
+				}
+				let pointerHoverSupported: Bool
+				if #available(iOS 13.4, *) {
+					pointerHoverSupported = true
+				} else {
+					pointerHoverSupported = false
+				}
+				guard GCMousePointerMapper.shouldSendRelativeMove(pointerHoverSupported: pointerHoverSupported) else {
+					return
+				}
+				guard status.isActive else {
+					return
+				}
 				CParsec.sendMouseDelta(Int32(v/1.25 * Float(SettingsHandler.mouseSensitivity)), Int32(-v2/1.25 * Float(SettingsHandler.mouseSensitivity)))
 				}
 			mouse.mouseInput?.scroll.yAxis.valueChangedHandler = {(_: GCControllerAxisInput, value: Float) in
-				CParsec.sendWheelMsg(x: Int32(value), y: 0)
+				ScrollInputGate.recordGCMouseScroll()
+				let wheel = GCMouseScrollMapper.yAxisWheel(rawValue: value, naturalScrolling: SettingsHandler.naturalScrolling)
+				CParsec.sendWheelMsg(x: wheel.x, y: wheel.y)
 			}
 			mouse.mouseInput?.scroll.xAxis.valueChangedHandler = {(_: GCControllerAxisInput, value: Float) in
-				CParsec.sendWheelMsg(x: 0, y: Int32(value))
+				ScrollInputGate.recordGCMouseScroll()
+				let wheel = GCMouseScrollMapper.xAxisWheel(rawValue: value, naturalScrolling: SettingsHandler.naturalScrolling)
+				CParsec.sendWheelMsg(x: wheel.x, y: wheel.y)
 			}
 		}
+	}
+
+	private func pointerInputStatus() -> PointerInputStatus? {
+		return pointerInputStatusProvider?()
 	}
 
 	@objc func didMouseConnectController(_ notification: Notification) {

@@ -10,6 +10,7 @@ struct SettingsView: View {
 	@AppStorage("cursorMode") var cursorMode: CursorMode = .touchpad
 	@AppStorage("cursorScale") var cursorScale: Double = 0.5
 	@AppStorage("mouseSensitivity") var mouseSensitivity: Double = 1.0
+	@AppStorage("naturalScrolling") var naturalScrolling: Bool = true
 	@AppStorage("noOverlay") var noOverlay: Bool = false
 	@AppStorage("hideStatusBar") var hideStatusBar: Bool = true
 	@AppStorage("rightClickPosition") var rightClickPosition: RightClickPosition = .firstFinger
@@ -108,6 +109,10 @@ struct SettingsView: View {
 								Slider(value: $mouseSensitivity, in: 0.1...4, step: 0.1)
 									.frame(width: 200)
 								Text(String(format: "%.1f", mouseSensitivity))
+							}
+							CatItem("Natural Scrolling") {
+								Toggle("", isOn: $naturalScrolling)
+									.frame(width: 80)
 							}
                         }
                         CatTitle("Graphics")

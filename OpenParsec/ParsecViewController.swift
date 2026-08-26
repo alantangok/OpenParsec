@@ -74,6 +74,10 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 	var contentView: UIView!
 	var lastLaidOutWidth: CGFloat = 0
 	var lastLaidOutHeight: CGFloat = 0
+	private weak var pointerHoverGestureRecognizer: UIHoverGestureRecognizer?
+	private var lastTrackpadScrollTranslation: CGPoint = .zero
+	private var accumulatedTrackpadScrollX: Float = 0
+	private var accumulatedTrackpadScrollY: Float = 0
 
 	override var prefersPointerLocked: Bool {
 		return true
@@ -213,6 +217,9 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		}
 
 		touchController.viewDidLoad()
+		gamePadController.pointerInputStatusProvider = { [weak self] in
+			self?.pointerInputStatus()
+		}
 		gamePadController.viewDidLoad()
 
 		// Touch overlay: a transparent sibling ON TOP of the scroll view (and above the gamepad /
@@ -236,6 +243,18 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 
 		let pointerInteraction = UIPointerInteraction(delegate: self)
 		view.addInteraction(pointerInteraction)
+
+		if #available(iOS 13.4, *) {
+			let hoverGestureRecognizer = UIHoverGestureRecognizer(target: self, action: #selector(handlePointerHover(_:)))
+			view.addGestureRecognizer(hoverGestureRecognizer)
+			pointerHoverGestureRecognizer = hoverGestureRecognizer
+
+			let scrollGestureRecognizer = UIPanGestureRecognizer(target: self, action: #selector(handleTrackpadScroll(_:)))
+			scrollGestureRecognizer.delegate = self
+			scrollGestureRecognizer.allowedScrollTypesMask = .all
+			scrollGestureRecognizer.maximumNumberOfTouches = 0
+			view.addGestureRecognizer(scrollGestureRecognizer)
+		}
 
 		view.isMultipleTouchEnabled = true
 		view.isUserInteractionEnabled = true
@@ -277,28 +296,43 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		longPressGestureRecognizer.cancelsTouchesInView = false
 		view.addGestureRecognizer(longPressGestureRecognizer)
 
-		NotificationCenter.default.addObserver(
-			self,
-			selector: #selector(keyboardWillShow),
-			name: UIResponder.keyboardWillShowNotification,
-			object: nil
-		)
+	}
 
-		NotificationCenter.default.addObserver(
-			self,
-			selector: #selector(keyboardWillHide),
-			name: UIResponder.keyboardWillHideNotification,
-			object: nil
-		)
+	private func startObservingInputLifecycle() {
+		stopObservingInputLifecycle()
+		NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow), name: UIResponder.keyboardWillShowNotification, object: nil)
+		NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillHide), name: UIResponder.keyboardWillHideNotification, object: nil)
+		NotificationCenter.default.addObserver(self, selector: #selector(appWillResignActive), name: UIApplication.willResignActiveNotification, object: nil)
+		NotificationCenter.default.addObserver(self, selector: #selector(windowDidBecomeKey), name: UIWindow.didBecomeKeyNotification, object: nil)
+		NotificationCenter.default.addObserver(self, selector: #selector(sceneDidActivate), name: UIScene.didActivateNotification, object: nil)
+	}
 
-		// Backgrounding / Control Center / system alerts can orphan touches; flush on resign.
-		NotificationCenter.default.addObserver(
-			self,
-			selector: #selector(appWillResignActive),
-			name: UIApplication.willResignActiveNotification,
-			object: nil
-		)
+	private func stopObservingInputLifecycle() {
+		NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
+		NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
+		NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
+		NotificationCenter.default.removeObserver(self, name: UIWindow.didBecomeKeyNotification, object: nil)
+		NotificationCenter.default.removeObserver(self, name: UIScene.didActivateNotification, object: nil)
+	}
 
+	private func requestPointerRelock() {
+		guard isViewLoaded, view.window != nil else { return }
+		if #available(iOS 13.4, *) {
+			pointerHoverGestureRecognizer?.isEnabled = false
+			pointerHoverGestureRecognizer?.isEnabled = true
+		}
+		parent?.setChildViewControllerForPointerLock(self)
+		setNeedsUpdateOfPrefersPointerLocked()
+	}
+
+	@objc private func windowDidBecomeKey(_ notification: Notification) {
+		guard let keyWindow = notification.object as? UIWindow, keyWindow === view.window else { return }
+		requestPointerRelock()
+	}
+
+	@objc private func sceneDidActivate(_ notification: Notification) {
+		guard let scene = notification.object as? UIScene, scene === view.window?.windowScene else { return }
+		requestPointerRelock()
 	}
 
 	override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
@@ -349,6 +383,12 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 			becomeFirstResponder()
 		}
 		// (Pinch-to-zoom is driven manually via touchOverlay; the scroll view's pinch stays off.)
+		requestPointerRelock()
+	}
+
+	override func viewWillAppear(_ animated: Bool) {
+		super.viewWillAppear(animated)
+		startObservingInputLifecycle()
 	}
 
 	override func viewWillDisappear(_ animated: Bool) {
@@ -358,9 +398,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 			parent.setChildForHomeIndicatorAutoHidden(nil)
 			parent.setChildViewControllerForPointerLock(nil)
 		}
-		NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
-		NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
-		NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
+		stopObservingInputLifecycle()
 	}
 	
 	
@@ -528,6 +566,81 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 
 	@objc func handlePinchGesture(_ gestureRecognizer: UIPinchGestureRecognizer) {
 		// Pinch is handled by UIScrollView
+	}
+
+	private func sendAbsolutePointerPosition(_ pointerLocation: CGPoint) {
+		let visibleFrame = contentView.convert(contentView.bounds, to: view)
+		let status = pointerInputStatus()
+		guard let hostPosition = PointerPositionMapper.hostPosition(
+			pointerLocation: pointerLocation,
+			visibleFrame: visibleFrame,
+			contentSize: contentView.bounds.size,
+			windowIsFocused: status.windowIsFocused,
+			appIsActive: status.appIsActive,
+			sceneIsForegroundActive: status.sceneIsForegroundActive
+		) else { return }
+
+		CParsec.sendMousePosition(Int32(hostPosition.x), Int32(hostPosition.y))
+	}
+
+	func pointerInputStatus() -> PointerInputStatus {
+		PointerInputGate.status(
+			windowIsFocused: view.window?.isKeyWindow == true,
+			appIsActive: UIApplication.shared.applicationState == .active,
+			sceneIsForegroundActive: view.window?.windowScene?.activationState == .foregroundActive
+		)
+	}
+
+	@available(iOS 13.4, *)
+	@objc func handlePointerHover(_ gestureRecognizer: UIHoverGestureRecognizer) {
+		switch gestureRecognizer.state {
+		case .began, .changed:
+			sendAbsolutePointerPosition(gestureRecognizer.location(in: view))
+		default:
+			break
+		}
+	}
+
+	@available(iOS 13.4, *)
+	@objc func handleTrackpadScroll(_ gestureRecognizer: UIPanGestureRecognizer) {
+		let translation = gestureRecognizer.translation(in: gestureRecognizer.view)
+		switch gestureRecognizer.state {
+		case .began:
+			lastTrackpadScrollTranslation = translation
+			accumulatedTrackpadScrollX = 0
+			accumulatedTrackpadScrollY = 0
+		case .changed:
+			let deltaX = Float(translation.x - lastTrackpadScrollTranslation.x)
+			let deltaY = Float(translation.y - lastTrackpadScrollTranslation.y)
+			lastTrackpadScrollTranslation = translation
+
+			guard ScrollInputGate.shouldSendTrackpadScroll() else {
+				accumulatedTrackpadScrollX = 0
+				accumulatedTrackpadScrollY = 0
+				return
+			}
+
+			let scale = ScrollWheelMapper.wheelScale(
+				sensitivity: mouseSensitivity,
+				naturalScrolling: SettingsHandler.naturalScrolling
+			)
+			accumulatedTrackpadScrollX += deltaX * scale
+			accumulatedTrackpadScrollY += deltaY * scale
+
+			let wheelX = Int32(accumulatedTrackpadScrollX)
+			let wheelY = Int32(accumulatedTrackpadScrollY)
+			if wheelX != 0 || wheelY != 0 {
+				CParsec.sendWheelMsg(x: wheelX, y: wheelY)
+				accumulatedTrackpadScrollX -= Float(wheelX)
+				accumulatedTrackpadScrollY -= Float(wheelY)
+			}
+		case .ended, .cancelled, .failed:
+			lastTrackpadScrollTranslation = .zero
+			accumulatedTrackpadScrollX = 0
+			accumulatedTrackpadScrollY = 0
+		default:
+			break
+		}
 	}
 
 	// MARK: - Manual touch handling (ParsecTouchInputDelegate)
@@ -977,6 +1090,7 @@ extension ParsecViewController: UIPointerInteractionDelegate {
 
 	func pointerInteraction(_ inter: UIPointerInteraction, regionFor request: UIPointerRegionRequest, defaultRegion: UIPointerRegion) -> UIPointerRegion? {
 		let loc = request.location
+		sendAbsolutePointerPosition(loc)
 		if let iv = view!.hitTest(loc, with: nil) {
 			let rect = view!.convert(iv.bounds, from: iv)
 			let region = UIPointerRegion(rect: rect, identifier: iv.tag)
@@ -1249,9 +1363,14 @@ protocol ParsecTouchInputDelegate: AnyObject {
 class TouchOverlayView: UIView {
 	weak var inputDelegate: ParsecTouchInputDelegate?
 
-	// Forward the live touch set (excluding ended/cancelled) on every event.
+	// External pointers also arrive through the dedicated hover/GCMouse paths. Ignore their
+	// duplicate UITouch events here so they do not fight the remote cursor position.
 	private func forward(_ event: UIEvent?, moved: Bool) {
-		let active = (event?.allTouches ?? []).filter { $0.phase != .ended && $0.phase != .cancelled }
+		let active = (event?.allTouches ?? []).filter { touch in
+			guard touch.phase != .ended && touch.phase != .cancelled else { return false }
+			if #available(iOS 13.4, *), touch.type == .indirectPointer { return false }
+			return true
+		}
 		inputDelegate?.parsecTouchesUpdated(active, moved: moved)
 	}
 	override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) { forward(event, moved: false) }
