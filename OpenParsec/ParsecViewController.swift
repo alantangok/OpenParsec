@@ -1058,6 +1058,12 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	}
 
 	private func clampViewportOffset(_ proposed: CGPoint, zoom: CGFloat) -> CGPoint {
+		guard ZoomViewportPolicy.shouldConstrain(
+			zoomEnabled: zoomEnabled,
+			zoomScale: zoom,
+			minimumZoomScale: scrollView.minimumZoomScale
+		) else { return proposed }
+
 		let viewport = scrollView.bounds.size
 		let hostRect = hostContentRect()
 		func clampAxis(
@@ -1188,7 +1194,11 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	// Once the scaled host fills the viewport, the offset cap prevents all four host edges from
 	// crossing into view and exposing letterbox space.
 	func repositionViewportForCursor() {
-		guard scrollView.zoomScale > 1.0 else { return }
+		guard ZoomViewportPolicy.shouldConstrain(
+			zoomEnabled: zoomEnabled,
+			zoomScale: scrollView.zoomScale,
+			minimumZoomScale: scrollView.minimumZoomScale
+		) else { return }
 		let zoom = scrollView.zoomScale
 		let visibleWidth = scrollView.bounds.width
 		let visibleHeight = scrollView.bounds.height

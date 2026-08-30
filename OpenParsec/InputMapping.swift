@@ -1,6 +1,18 @@
 import Foundation
 import CoreGraphics
 
+enum ZoomViewportPolicy {
+	private static let originalScaleTolerance: CGFloat = 0.01
+
+	static func shouldConstrain(
+		zoomEnabled: Bool,
+		zoomScale: CGFloat,
+		minimumZoomScale: CGFloat
+	) -> Bool {
+		return zoomEnabled && zoomScale > minimumZoomScale + originalScaleTolerance
+	}
+}
+
 enum ScrollWheelMapper {
 	private static let wheelDivisor: Float = 20.0
 
