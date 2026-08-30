@@ -994,37 +994,31 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 			_ value: CGFloat,
 			contentMin: CGFloat,
 			contentMax: CGFloat,
-			viewportLength: CGFloat,
-			cursor: CGFloat
+			viewportLength: CGFloat
 		) -> CGFloat {
 			let lower = contentMin * zoom
 			let upper = contentMax * zoom - viewportLength
 			if upper >= lower {
+				// Once the scaled host fills this axis, cap panning at both host edges so
+				// cursor-following can never expose letterbox space.
 				return min(max(value, lower), upper)
 			}
-
-			// Below the fill scale one host axis is shorter than the viewport, so black space
-			// cannot be removed entirely. Keep the user's zoom and move that space away from
-			// the cursor: align the host's top/left or bottom/right edge when the cursor nears it.
-			let edgeZone = (contentMax - contentMin) * 0.2
-			if cursor <= contentMin + edgeZone { return lower }
-			if cursor >= contentMax - edgeZone { return upper }
-			return min(max(value, upper), lower)
+			// Before this axis fills the viewport, keep its unavoidable letterbox space
+			// centred. Do not switch alignment based on cursor position; that causes jumps.
+			return (lower + upper) / 2
 		}
 		return CGPoint(
 			x: clampAxis(
 				proposed.x,
 				contentMin: hostRect.minX,
 				contentMax: hostRect.maxX,
-				viewportLength: viewport.width,
-				cursor: cursorContentPos.x
+				viewportLength: viewport.width
 			),
 			y: clampAxis(
 				proposed.y,
 				contentMin: hostRect.minY,
 				contentMax: hostRect.maxY,
-				viewportLength: viewport.height,
-				cursor: cursorContentPos.y
+				viewportLength: viewport.height
 			)
 		)
 	}
@@ -1120,9 +1114,9 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 		repositionViewportForCursor()
 	}
 
-	// Move the viewport only when the cursor approaches an edge. This keeps the current scene
-	// position stable instead of pinning the cursor to centre. Below the fill scale, the clamp
-	// aligns the nearest host edge so unavoidable black space stays opposite the cursor.
+	// Move the viewport only when the cursor approaches an edge, without pinning it to centre.
+	// Once the scaled host fills the viewport, the offset cap prevents all four host edges from
+	// crossing into view and exposing letterbox space.
 	func repositionViewportForCursor() {
 		guard scrollView.zoomScale > 1.0 else { return }
 		let zoom = scrollView.zoomScale
