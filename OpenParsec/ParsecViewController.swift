@@ -155,10 +155,11 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 			// driven moves are reflected and any prediction drift is corrected.
 			if !isDragging && !clickHoldActive && !cursorMomentumActive {
 				cursorContentPos = CGPoint(x: CGFloat(currentMouseX), y: CGFloat(currentMouseY))
-				positionCursorOverlay()
 				if scrollView.zoomScale > 1.0 {
-					centerViewportOnCursorPos()
-				} else if keyboardVisible && scrollView.contentInset.bottom > 0 {
+					repositionViewportForCursor()
+				}
+				positionCursorOverlay()
+				if scrollView.zoomScale <= 1.0 && keyboardVisible && scrollView.contentInset.bottom > 0 {
 					// Not zoomed: keep the cursor above the on-screen keyboard.
 					let margin: CGFloat = 50.0
 					let effectiveViewHeight = view.bounds.height - keyboardHeight
@@ -829,7 +830,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 		// Command the host to the ABSOLUTE predicted position (not a delta) so the host cursor can't
 		// crawl behind network round-trips - clicks always land where the cursor is drawn.
 		CParsec.sendMousePosition(Int32(cursorContentPos.x), Int32(cursorContentPos.y))
-		centerViewportOnCursorPos()
+		repositionViewportForCursor()
 		positionCursorOverlay()
 	}
 
@@ -924,7 +925,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 			if !CParsec.mouseInfo.mousePositionRelative {
 				CParsec.sendMousePosition(Int32(cursorContentPos.x), Int32(cursorContentPos.y))
 			}
-			centerViewportOnCursorPos()
+			repositionViewportForCursor()
 			positionCursorOverlay()
 			let stalled = abs(cursorContentPos.x - before.x) < 0.05 && abs(cursorContentPos.y - before.y) < 0.05
 			if hypot(cursorVelocity.x, cursorVelocity.y) < cursorStopSpeed || stalled {
@@ -956,27 +957,71 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	// content point under the anchor fixed. Replaces the scroll view's own pinch recognizer.
 	private func applyZoom(to targetScale: CGFloat, anchorInView anchor: CGPoint) {
 		let oldZoom = scrollView.zoomScale
-		let newZoom = min(max(targetScale, scrollView.minimumZoomScale), scrollView.maximumZoomScale)
+		let clampedTarget = min(max(targetScale, scrollView.minimumZoomScale), scrollView.maximumZoomScale)
+		let fillZoom = min(max(minimumZoomScaleToFillViewport(), scrollView.minimumZoomScale), scrollView.maximumZoomScale)
+		let newZoom: CGFloat
+		if clampedTarget <= scrollView.minimumZoomScale + 0.0001 {
+			newZoom = scrollView.minimumZoomScale
+		} else if oldZoom <= scrollView.minimumZoomScale + 0.0001 {
+			// A zoomed viewport must cover the letterboxed stream on both axes. Jump directly
+			// from 1x to the first scale that can fill the client without exposing black bars.
+			newZoom = max(clampedTarget, fillZoom)
+		} else if oldZoom <= fillZoom + 0.0001 && clampedTarget < oldZoom {
+			// The only valid scale below fillZoom is 1x; otherwise an incremental pinch would
+			// get stuck at fillZoom because each event is relative to the previous distance.
+			newZoom = scrollView.minimumZoomScale
+		} else {
+			newZoom = max(clampedTarget, fillZoom)
+		}
 		guard abs(newZoom - oldZoom) > 0.0001 else { return }
 		let off = scrollView.contentOffset
 		let contentX = (anchor.x + off.x) / oldZoom
 		let contentY = (anchor.y + off.y) / oldZoom
 		scrollView.zoomScale = newZoom
-		var newOff = CGPoint(x: contentX * newZoom - anchor.x, y: contentY * newZoom - anchor.y)
-		let maxX = max(0, scrollView.contentSize.width - scrollView.bounds.width)
-		let maxY = max(0, scrollView.contentSize.height - scrollView.bounds.height)
-		newOff.x = min(max(0, newOff.x), maxX)
-		newOff.y = min(max(0, newOff.y), maxY)
+		let proposedOffset = CGPoint(x: contentX * newZoom - anchor.x, y: contentY * newZoom - anchor.y)
+		let newOff = clampViewportOffset(proposedOffset, zoom: newZoom)
 		scrollView.setContentOffset(newOff, animated: false)
-		// Park the cursor at the viewport centre after zooming so a later drag doesn't snap the view.
-		let bottomInset = keyboardVisible ? keyboardHeight : 0.0
-		let centerX = (scrollView.bounds.width / 2 + scrollView.contentOffset.x) / newZoom
-		let centerY = ((scrollView.bounds.height - bottomInset) / 2 + scrollView.contentOffset.y) / newZoom
-		cursorContentPos = clampToContent(CGPoint(x: centerX, y: centerY))
-		if !CParsec.mouseInfo.mousePositionRelative {
-			CParsec.sendMousePosition(Int32(cursorContentPos.x), Int32(cursorContentPos.y))
-		}
+		// Preserve the actual host cursor position. Pinching moves only the viewport.
 		positionCursorOverlay()
+	}
+
+	private func hostContentRect() -> CGRect {
+		let viewport = scrollView.bounds.size
+		let hostWidth = CGFloat(CParsec.hostWidth)
+		let hostHeight = CGFloat(CParsec.hostHeight)
+		guard viewport.width > 0, viewport.height > 0, hostWidth > 0, hostHeight > 0 else {
+			return CGRect(origin: .zero, size: viewport)
+		}
+		let fitScale = min(viewport.width / hostWidth, viewport.height / hostHeight)
+		let contentSize = CGSize(width: hostWidth * fitScale, height: hostHeight * fitScale)
+		return CGRect(
+			x: (viewport.width - contentSize.width) / 2,
+			y: (viewport.height - contentSize.height) / 2,
+			width: contentSize.width,
+			height: contentSize.height
+		)
+	}
+
+	private func minimumZoomScaleToFillViewport() -> CGFloat {
+		let viewport = scrollView.bounds.size
+		let hostRect = hostContentRect()
+		guard hostRect.width > 0, hostRect.height > 0 else { return scrollView.minimumZoomScale }
+		return max(viewport.width / hostRect.width, viewport.height / hostRect.height)
+	}
+
+	private func clampViewportOffset(_ proposed: CGPoint, zoom: CGFloat) -> CGPoint {
+		let viewport = scrollView.bounds.size
+		let hostRect = hostContentRect()
+		func clampAxis(_ value: CGFloat, contentMin: CGFloat, contentMax: CGFloat, viewportLength: CGFloat) -> CGFloat {
+			let lower = contentMin * zoom
+			let upper = contentMax * zoom - viewportLength
+			guard upper >= lower else { return (lower + upper) / 2 }
+			return min(max(value, lower), upper)
+		}
+		return CGPoint(
+			x: clampAxis(proposed.x, contentMin: hostRect.minX, contentMax: hostRect.maxX, viewportLength: viewport.width),
+			y: clampAxis(proposed.y, contentMin: hostRect.minY, contentMax: hostRect.maxY, viewportLength: viewport.height)
+		)
 	}
 
 	private func clampToContent(_ p: CGPoint) -> CGPoint {
@@ -1067,26 +1112,33 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	}
 
 	func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
-		centerViewportOnCursorPos()
+		repositionViewportForCursor()
 	}
 
-	// Slides the viewport so the host cursor stays centered on screen while zoomed in,
-	// clamped so the cursor can still reach the true edges of the host screen.
-	func centerViewportOnCursorPos() {
+	// Move the viewport only when the cursor approaches an edge. This keeps the current scene
+	// position stable instead of pinning the cursor to centre, while the host-content clamp keeps
+	// every visible client pixel inside the rendered stream rather than its letterbox bars.
+	func repositionViewportForCursor() {
 		guard scrollView.zoomScale > 1.0 else { return }
 		let zoom = scrollView.zoomScale
-		let bottomInset = keyboardVisible ? keyboardHeight : 0.0
-		let visibleWidth = view.bounds.width
-		let visibleHeight = view.bounds.height - bottomInset
+		let visibleWidth = scrollView.bounds.width
+		let visibleHeight = scrollView.bounds.height
 		let cursorX = cursorContentPos.x * zoom
 		let cursorY = cursorContentPos.y * zoom
-		var targetX = cursorX - visibleWidth / 2
-		var targetY = cursorY - visibleHeight / 2
-		let maxX = max(0, scrollView.contentSize.width - scrollView.bounds.width)
-		let maxY = max(0, scrollView.contentSize.height - scrollView.bounds.height + bottomInset)
-		targetX = min(max(0, targetX), maxX)
-		targetY = min(max(0, targetY), maxY)
-		scrollView.setContentOffset(CGPoint(x: targetX, y: targetY), animated: false)
+		let marginX = min(96, visibleWidth * 0.18)
+		let marginY = min(96, visibleHeight * 0.18)
+		var proposed = scrollView.contentOffset
+		if cursorX < proposed.x + marginX {
+			proposed.x = cursorX - marginX
+		} else if cursorX > proposed.x + visibleWidth - marginX {
+			proposed.x = cursorX - visibleWidth + marginX
+		}
+		if cursorY < proposed.y + marginY {
+			proposed.y = cursorY - marginY
+		} else if cursorY > proposed.y + visibleHeight - marginY {
+			proposed.y = cursorY - visibleHeight + marginY
+		}
+		scrollView.setContentOffset(clampViewportOffset(proposed, zoom: zoom), animated: false)
 	}
 
 	func setZoomEnabled(_ enabled: Bool) {
