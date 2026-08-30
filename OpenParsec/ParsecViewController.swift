@@ -957,22 +957,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	// content point under the anchor fixed. Replaces the scroll view's own pinch recognizer.
 	private func applyZoom(to targetScale: CGFloat, anchorInView anchor: CGPoint) {
 		let oldZoom = scrollView.zoomScale
-		let clampedTarget = min(max(targetScale, scrollView.minimumZoomScale), scrollView.maximumZoomScale)
-		let fillZoom = min(max(minimumZoomScaleToFillViewport(), scrollView.minimumZoomScale), scrollView.maximumZoomScale)
-		let newZoom: CGFloat
-		if clampedTarget <= scrollView.minimumZoomScale + 0.0001 {
-			newZoom = scrollView.minimumZoomScale
-		} else if oldZoom <= scrollView.minimumZoomScale + 0.0001 {
-			// A zoomed viewport must cover the letterboxed stream on both axes. Jump directly
-			// from 1x to the first scale that can fill the client without exposing black bars.
-			newZoom = max(clampedTarget, fillZoom)
-		} else if oldZoom <= fillZoom + 0.0001 && clampedTarget < oldZoom {
-			// The only valid scale below fillZoom is 1x; otherwise an incremental pinch would
-			// get stuck at fillZoom because each event is relative to the previous distance.
-			newZoom = scrollView.minimumZoomScale
-		} else {
-			newZoom = max(clampedTarget, fillZoom)
-		}
+		let newZoom = min(max(targetScale, scrollView.minimumZoomScale), scrollView.maximumZoomScale)
 		guard abs(newZoom - oldZoom) > 0.0001 else { return }
 		let off = scrollView.contentOffset
 		let contentX = (anchor.x + off.x) / oldZoom
@@ -1002,25 +987,45 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 		)
 	}
 
-	private func minimumZoomScaleToFillViewport() -> CGFloat {
-		let viewport = scrollView.bounds.size
-		let hostRect = hostContentRect()
-		guard hostRect.width > 0, hostRect.height > 0 else { return scrollView.minimumZoomScale }
-		return max(viewport.width / hostRect.width, viewport.height / hostRect.height)
-	}
-
 	private func clampViewportOffset(_ proposed: CGPoint, zoom: CGFloat) -> CGPoint {
 		let viewport = scrollView.bounds.size
 		let hostRect = hostContentRect()
-		func clampAxis(_ value: CGFloat, contentMin: CGFloat, contentMax: CGFloat, viewportLength: CGFloat) -> CGFloat {
+		func clampAxis(
+			_ value: CGFloat,
+			contentMin: CGFloat,
+			contentMax: CGFloat,
+			viewportLength: CGFloat,
+			cursor: CGFloat
+		) -> CGFloat {
 			let lower = contentMin * zoom
 			let upper = contentMax * zoom - viewportLength
-			guard upper >= lower else { return (lower + upper) / 2 }
-			return min(max(value, lower), upper)
+			if upper >= lower {
+				return min(max(value, lower), upper)
+			}
+
+			// Below the fill scale one host axis is shorter than the viewport, so black space
+			// cannot be removed entirely. Keep the user's zoom and move that space away from
+			// the cursor: align the host's top/left or bottom/right edge when the cursor nears it.
+			let edgeZone = (contentMax - contentMin) * 0.2
+			if cursor <= contentMin + edgeZone { return lower }
+			if cursor >= contentMax - edgeZone { return upper }
+			return min(max(value, upper), lower)
 		}
 		return CGPoint(
-			x: clampAxis(proposed.x, contentMin: hostRect.minX, contentMax: hostRect.maxX, viewportLength: viewport.width),
-			y: clampAxis(proposed.y, contentMin: hostRect.minY, contentMax: hostRect.maxY, viewportLength: viewport.height)
+			x: clampAxis(
+				proposed.x,
+				contentMin: hostRect.minX,
+				contentMax: hostRect.maxX,
+				viewportLength: viewport.width,
+				cursor: cursorContentPos.x
+			),
+			y: clampAxis(
+				proposed.y,
+				contentMin: hostRect.minY,
+				contentMax: hostRect.maxY,
+				viewportLength: viewport.height,
+				cursor: cursorContentPos.y
+			)
 		)
 	}
 
@@ -1116,8 +1121,8 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	}
 
 	// Move the viewport only when the cursor approaches an edge. This keeps the current scene
-	// position stable instead of pinning the cursor to centre, while the host-content clamp keeps
-	// every visible client pixel inside the rendered stream rather than its letterbox bars.
+	// position stable instead of pinning the cursor to centre. Below the fill scale, the clamp
+	// aligns the nearest host edge so unavoidable black space stays opposite the cursor.
 	func repositionViewportForCursor() {
 		guard scrollView.zoomScale > 1.0 else { return }
 		let zoom = scrollView.zoomScale
