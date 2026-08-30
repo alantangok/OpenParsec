@@ -10,6 +10,7 @@ class GamepadController {
     // private var panRecognizer: UIPanGestureRecognizer!
     weak var delegate: InputManagerDelegate?
 	var pointerInputStatusProvider: (() -> PointerInputStatus?)?
+	var gcmouseScrollHandler: ((GCMouseScrollAxis, Float) -> Void)?
 
     public func viewDidLoad() {
 
@@ -115,15 +116,13 @@ class GamepadController {
 				}
 				CParsec.sendMouseDelta(Int32(v/1.25 * Float(SettingsHandler.mouseSensitivity)), Int32(-v2/1.25 * Float(SettingsHandler.mouseSensitivity)))
 				}
-			mouse.mouseInput?.scroll.yAxis.valueChangedHandler = {(_: GCControllerAxisInput, value: Float) in
+			mouse.mouseInput?.scroll.yAxis.valueChangedHandler = {[weak self] (_: GCControllerAxisInput, value: Float) in
 				ScrollInputGate.recordGCMouseScroll()
-				let wheel = GCMouseScrollMapper.yAxisWheel(rawValue: value, naturalScrolling: SettingsHandler.naturalScrolling)
-				CParsec.sendWheelMsg(x: wheel.x, y: wheel.y)
+				self?.gcmouseScrollHandler?(.y, value)
 			}
-			mouse.mouseInput?.scroll.xAxis.valueChangedHandler = {(_: GCControllerAxisInput, value: Float) in
+			mouse.mouseInput?.scroll.xAxis.valueChangedHandler = {[weak self] (_: GCControllerAxisInput, value: Float) in
 				ScrollInputGate.recordGCMouseScroll()
-				let wheel = GCMouseScrollMapper.xAxisWheel(rawValue: value, naturalScrolling: SettingsHandler.naturalScrolling)
-				CParsec.sendWheelMsg(x: wheel.x, y: wheel.y)
+				self?.gcmouseScrollHandler?(.x, value)
 			}
 		}
 	}

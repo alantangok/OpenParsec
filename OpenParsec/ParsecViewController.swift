@@ -79,6 +79,12 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 	private var lastTrackpadScrollTranslation: CGPoint = .zero
 	private var accumulatedTrackpadScrollX: Float = 0
 	private var accumulatedTrackpadScrollY: Float = 0
+	private var gcmouseScrollMotion = GCMouseScrollMotion()
+	private var gcmouseScrollTracking = false
+	private var gcmouseScrollMomentumActive = false
+	private let gcmouseScrollIdleDelay: TimeInterval = 0.05
+	private let gcmouseScrollStartSpeed: Float = 20
+	private let gcmouseScrollStopSpeed: Float = 2
 
 	override var prefersPointerLocked: Bool {
 		return true
@@ -221,6 +227,9 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		touchController.viewDidLoad()
 		gamePadController.pointerInputStatusProvider = { [weak self] in
 			self?.pointerInputStatus()
+		}
+		gamePadController.gcmouseScrollHandler = { [weak self] axis, value in
+			self?.handleGCMouseScroll(axis: axis, rawValue: value)
 		}
 		gamePadController.viewDidLoad()
 
@@ -666,6 +675,24 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 		}
 	}
 
+	private func handleGCMouseScroll(axis: GCMouseScrollAxis, rawValue: Float) {
+		let now = CACurrentMediaTime()
+		gcmouseScrollTracking = true
+		gcmouseScrollMomentumActive = false
+		scrollMomentumActive = false
+
+		let wheel = gcmouseScrollMotion.consume(
+			axis: axis,
+			rawValue: rawValue,
+			naturalScrolling: SettingsHandler.naturalScrolling,
+			at: now
+		)
+		if wheel.x != 0 || wheel.y != 0 {
+			CParsec.sendWheelMsg(x: wheel.x, y: wheel.y)
+		}
+		ensureMomentumLink()
+	}
+
 	// MARK: - Manual touch handling (ParsecTouchInputDelegate)
 	// touchOverlay delivers raw touches here. One finger drives the mouse cursor; two fingers are
 	// classified once per gesture into either pinch-zoom or host scroll-wheel (never both), so the
@@ -913,6 +940,9 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	func stopMomentum() {
 		cursorMomentumActive = false
 		scrollMomentumActive = false
+		gcmouseScrollTracking = false
+		gcmouseScrollMomentumActive = false
+		gcmouseScrollMotion.reset()
 		cursorVelocity = .zero
 		scrollVelocity = 0
 		momentumLink?.invalidate()
@@ -954,6 +984,37 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 			}
 			if abs(scrollVelocity) < scrollStopSpeed {
 				scrollMomentumActive = false
+			} else {
+				stillActive = true
+			}
+		}
+
+		if gcmouseScrollTracking {
+			if let lastEventTime = gcmouseScrollMotion.lastEventTime,
+			   CACurrentMediaTime() - lastEventTime < gcmouseScrollIdleDelay {
+				stillActive = true
+			} else {
+				gcmouseScrollTracking = false
+				gcmouseScrollMomentumActive = gcmouseScrollMotion.shouldStartMomentum(
+					minimumSpeed: gcmouseScrollStartSpeed
+				)
+				if !gcmouseScrollMomentumActive {
+					gcmouseScrollMotion.reset()
+				}
+			}
+		}
+
+		if gcmouseScrollMomentumActive {
+			let wheel = gcmouseScrollMotion.momentumWheel(
+				deltaTime: Float(dt),
+				decayPerSecond: scrollDecayPerSec
+			)
+			if wheel.x != 0 || wheel.y != 0 {
+				CParsec.sendWheelMsg(x: wheel.x, y: wheel.y)
+			}
+			if gcmouseScrollMotion.shouldStopMomentum(maximumSpeed: gcmouseScrollStopSpeed) {
+				gcmouseScrollMomentumActive = false
+				gcmouseScrollMotion.reset()
 			} else {
 				stillActive = true
 			}
