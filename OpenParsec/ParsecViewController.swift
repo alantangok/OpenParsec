@@ -334,6 +334,15 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		setNeedsUpdateOfPrefersPointerLocked()
 	}
 
+	func restorePointerInputAfterPiP() {
+		requestPointerRelock()
+		// PiP teardown completes after scene activation. Retry once after UIKit has restored
+		// the fullscreen window so the hover recognizer and pointer lock use its final state.
+		DispatchQueue.main.async { [weak self] in
+			self?.requestPointerRelock()
+		}
+	}
+
 	@objc private func windowDidBecomeKey(_ notification: Notification) {
 		guard let keyWindow = notification.object as? UIWindow, keyWindow === view.window else { return }
 		requestPointerRelock()
