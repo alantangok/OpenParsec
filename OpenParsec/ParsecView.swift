@@ -176,7 +176,7 @@ struct ParsecView: View {
 
 		let save = SettingsHandler.saveSessionSettings
 		_muted = State(initialValue: SettingsHandler.startMuted || (save && SettingsHandler.savedMuted))
-		_zoomEnabled = State(initialValue: save ? SettingsHandler.savedZoomEnabled : false)
+		_zoomEnabled = State(initialValue: SettingsHandler.pinchZoomEnabled)
 		_constantFps = State(initialValue: save ? SettingsHandler.savedConstantFps : false)
 		_resolutions = State(initialValue: ParsecResolution.resolutions)
 		_bitrates = State(initialValue: ParsecResolution.bitrates)
@@ -459,6 +459,15 @@ struct ParsecView: View {
         parsecViewController.onKeyboardVisibilityChanged = { visible in
             showKeyboard = visible
         }
+		let menuVisibility = $showMenu
+		parsecViewController.onMenuEdgeSwipe = {
+			DispatchQueue.main.async {
+				menuVisibility.wrappedValue = true
+				let data = Data()
+				CParsec.sendUserData(type: .getVideoConfig, message: data)
+				CParsec.sendUserData(type: .getAdapterInfo, message: data)
+			}
+		}
 
 		parsecViewController.setKeyboardVisible(showKeyboard)
 	}
@@ -565,7 +574,7 @@ struct ParsecView: View {
 		DispatchQueue.main.async {
 			zoomEnabled.toggle()
 			parsecViewController.setZoomEnabled(zoomEnabled)
-			if SettingsHandler.saveSessionSettings { SettingsHandler.savedZoomEnabled = zoomEnabled }
+			SettingsHandler.pinchZoomEnabled = zoomEnabled
 		}
 	}
 

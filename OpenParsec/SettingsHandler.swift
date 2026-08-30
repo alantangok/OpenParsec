@@ -1,6 +1,11 @@
 import Foundation
 import SwiftUI
 
+enum MenuSwipeEdge: Int {
+	case left
+	case right
+}
+
 struct SettingsHandler {
 	// public static var renderer:RendererType = .opengl
 	@AppStorage("resolution") public static var resolution: ParsecResolution = .client
@@ -10,6 +15,7 @@ struct SettingsHandler {
 	@AppStorage("cursorScale") public static var cursorScale: Double = 0.5
 	@AppStorage("mouseSensitivity") public static var mouseSensitivity: Double = 1.0
 	@AppStorage("naturalScrolling") public static var naturalScrolling: Bool = true
+	@AppStorage("menuSwipeEdge") public static var menuSwipeEdge: MenuSwipeEdge = .left
 	@AppStorage("noOverlay") public static var noOverlay: Bool = false
 	@AppStorage("hideStatusBar") public static var hideStatusBar: Bool = true
 	@AppStorage("rightClickPosition") public static var rightClickPosition: RightClickPosition = .firstFinger
@@ -26,7 +32,7 @@ struct SettingsHandler {
 	@AppStorage("autoConnectOnLaunch") public static var autoConnectOnLaunch: Bool = false
 
 	@AppStorage("saveSessionSettings") public static var saveSessionSettings: Bool = true
-	@AppStorage("savedZoomEnabled") public static var savedZoomEnabled: Bool = false
+	@AppStorage("savedZoomEnabled") public static var pinchZoomEnabled: Bool = false
 	@AppStorage("savedConstantFps") public static var savedConstantFps: Bool = false
 	@AppStorage("savedMuted") public static var savedMuted: Bool = false
 
