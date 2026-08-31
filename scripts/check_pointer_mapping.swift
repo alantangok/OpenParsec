@@ -99,6 +99,12 @@ struct CheckPointerMapping {
 		if !GCMousePointerMapper.shouldSendRelativeMove(pointerHoverSupported: false) {
 			fatalError("gcmouse move should be allowed without absolute hover support")
 		}
+		if GCMousePointerMapper.shouldSendButton(pointerButtonTouchSupported: true) {
+			fatalError("gcmouse buttons should be blocked when UIKit pointer buttons are supported")
+		}
+		if !GCMousePointerMapper.shouldSendButton(pointerButtonTouchSupported: false) {
+			fatalError("gcmouse buttons should be allowed without UIKit pointer button support")
+		}
 
 		print("pointer mapping ok")
 	}

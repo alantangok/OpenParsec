@@ -10,6 +10,7 @@ class GamepadController {
     // private var panRecognizer: UIPanGestureRecognizer!
     weak var delegate: InputManagerDelegate?
 	var pointerInputStatusProvider: (() -> PointerInputStatus?)?
+	var pointerButtonTouchSupported = false
 	var gcmouseScrollHandler: ((GCMouseScrollAxis, Float) -> Void)?
 
     public func viewDidLoad() {
@@ -84,17 +85,20 @@ class GamepadController {
 	func registerMouseHandler() {
 		for mouse in GCMouse.mice() {
 			mice.insert(mouse)
-			mouse.mouseInput?.leftButton.pressedChangedHandler = {(_: GCControllerButtonInput, _: Float, pressed: Bool) in
+			mouse.mouseInput?.leftButton.pressedChangedHandler = {[weak self] (_: GCControllerButtonInput, _: Float, pressed: Bool) in
+				guard GCMousePointerMapper.shouldSendButton(pointerButtonTouchSupported: self?.pointerButtonTouchSupported == true) else { return }
 				guard ParsecBackgroundManager.shared.hasActiveConnection else { return }
 				CParsec.sendMouseClickMessage(MOUSE_L, pressed)
 				}
-			mouse.mouseInput?.rightButton?.pressedChangedHandler = {(_: GCControllerButtonInput, _: Float, pressed: Bool) in
+			mouse.mouseInput?.rightButton?.pressedChangedHandler = {[weak self] (_: GCControllerButtonInput, _: Float, pressed: Bool) in
+				guard GCMousePointerMapper.shouldSendButton(pointerButtonTouchSupported: self?.pointerButtonTouchSupported == true) else { return }
 				// pointer-lock toggles on the connect/disconnect view swap can synthesize a button edge
 				// with no real input — dont forward it unless a session is actually live
 				guard ParsecBackgroundManager.shared.hasActiveConnection else { return }
 				CParsec.sendMouseClickMessage(MOUSE_R, pressed)
 				}
-			mouse.mouseInput?.middleButton?.pressedChangedHandler = {(_: GCControllerButtonInput, _: Float, pressed: Bool) in
+			mouse.mouseInput?.middleButton?.pressedChangedHandler = {[weak self] (_: GCControllerButtonInput, _: Float, pressed: Bool) in
+				guard GCMousePointerMapper.shouldSendButton(pointerButtonTouchSupported: self?.pointerButtonTouchSupported == true) else { return }
 				guard ParsecBackgroundManager.shared.hasActiveConnection else { return }
 				CParsec.sendMouseClickMessage(MOUSE_MIDDLE, pressed)
 				}

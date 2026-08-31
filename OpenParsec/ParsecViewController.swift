@@ -231,6 +231,9 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		gamePadController.gcmouseScrollHandler = { [weak self] axis, value in
 			self?.handleGCMouseScroll(axis: axis, rawValue: value)
 		}
+		if #available(iOS 13.4, *) {
+			gamePadController.pointerButtonTouchSupported = true
+		}
 		gamePadController.viewDidLoad()
 
 		// Touch overlay: a transparent sibling ON TOP of the scroll view (and above the gamepad /
@@ -263,6 +266,19 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		view.addInteraction(pointerInteraction)
 
 		if #available(iOS 13.4, *) {
+			let pointerButtonGestureRecognizer = PointerButtonGestureRecognizer()
+			pointerButtonGestureRecognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)]
+			pointerButtonGestureRecognizer.cancelsTouchesInView = false
+			pointerButtonGestureRecognizer.delegate = self
+			pointerButtonGestureRecognizer.shouldForwardPress = { [weak self] in
+				guard let self else { return false }
+				return ParsecBackgroundManager.shared.hasActiveConnection && self.pointerInputStatus().isActive
+			}
+			pointerButtonGestureRecognizer.buttonChangedHandler = { [weak self] button, pressed in
+				self?.handlePointerButton(button, pressed: pressed)
+			}
+			view.addGestureRecognizer(pointerButtonGestureRecognizer)
+
 			let hoverGestureRecognizer = UIHoverGestureRecognizer(target: self, action: #selector(handlePointerHover(_:)))
 			view.addGestureRecognizer(hoverGestureRecognizer)
 			pointerHoverGestureRecognizer = hoverGestureRecognizer
@@ -631,6 +647,22 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 		default:
 			break
 		}
+	}
+
+	@available(iOS 13.4, *)
+	private func handlePointerButton(_ button: UIEvent.ButtonMask, pressed: Bool) {
+		let parsecButton: ParsecMouseButton
+		switch button {
+		case .primary:
+			parsecButton = MOUSE_L
+		case .secondary:
+			parsecButton = MOUSE_R
+		case .button(3):
+			parsecButton = MOUSE_MIDDLE
+		default:
+			return
+		}
+		CParsec.sendMouseClickMessage(parsecButton, pressed)
 	}
 
 	@available(iOS 13.4, *)
@@ -1499,6 +1531,57 @@ extension ParsecViewController: UIKeyInput, UITextInputTraits {
 protocol ParsecTouchInputDelegate: AnyObject {
 	// Called on every touch change with the authoritative set of currently-active touches.
 	func parsecTouchesUpdated(_ activeTouches: Set<UITouch>, moved: Bool)
+}
+
+@available(iOS 13.4, *)
+final class PointerButtonGestureRecognizer: UIGestureRecognizer {
+	// Preserve raw button down/up edges so rapid clicks and click-drag reach the host unchanged.
+	var shouldForwardPress: () -> Bool = { true }
+	var buttonChangedHandler: ((UIEvent.ButtonMask, Bool) -> Void)?
+
+	private let supportedButtons: [UIEvent.ButtonMask] = [.primary, .secondary, .button(3)]
+	private var activeButtons: UIEvent.ButtonMask = []
+
+	override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+		guard shouldForwardPress() else {
+			state = .failed
+			return
+		}
+
+		for button in supportedButtons where event.buttonMask.contains(button) {
+			activeButtons.insert(button)
+			buttonChangedHandler?(button, true)
+		}
+		state = activeButtons.isEmpty ? .failed : .began
+	}
+
+	override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+		if state == .began || state == .changed {
+			state = .changed
+		}
+	}
+
+	override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+		releaseActiveButtons()
+		state = .ended
+	}
+
+	override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+		releaseActiveButtons()
+		state = .cancelled
+	}
+
+	override func reset() {
+		releaseActiveButtons()
+		super.reset()
+	}
+
+	private func releaseActiveButtons() {
+		for button in supportedButtons where activeButtons.contains(button) {
+			buttonChangedHandler?(button, false)
+		}
+		activeButtons = []
+	}
 }
 
 // A transparent overlay that owns every raw touch and forwards it to the controller. Sitting on

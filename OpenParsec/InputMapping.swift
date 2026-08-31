@@ -185,6 +185,10 @@ enum GCMousePointerMapper {
 	static func shouldSendRelativeMove(pointerHoverSupported: Bool) -> Bool {
 		return !pointerHoverSupported
 	}
+
+	static func shouldSendButton(pointerButtonTouchSupported: Bool) -> Bool {
+		return !pointerButtonTouchSupported
+	}
 }
 
 enum PointerPositionMapper {
