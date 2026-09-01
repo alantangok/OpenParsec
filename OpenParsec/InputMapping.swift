@@ -11,6 +11,19 @@ enum ZoomViewportPolicy {
 	) -> Bool {
 		return zoomEnabled && zoomScale > minimumZoomScale + originalScaleTolerance
 	}
+
+	static func shouldRepositionForCursor(
+		zoomEnabled: Bool,
+		zoomScale: CGFloat,
+		minimumZoomScale: CGFloat,
+		directMouseMode: Bool
+	) -> Bool {
+		return !directMouseMode && shouldConstrain(
+			zoomEnabled: zoomEnabled,
+			zoomScale: zoomScale,
+			minimumZoomScale: minimumZoomScale
+		)
+	}
 }
 
 enum ScrollWheelMapper {

@@ -1226,10 +1226,11 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	// Once the scaled host fills the viewport, the offset cap prevents all four host edges from
 	// crossing into view and exposing letterbox space.
 	func repositionViewportForCursor() {
-		guard ZoomViewportPolicy.shouldConstrain(
+		guard ZoomViewportPolicy.shouldRepositionForCursor(
 			zoomEnabled: zoomEnabled,
 			zoomScale: scrollView.zoomScale,
-			minimumZoomScale: scrollView.minimumZoomScale
+			minimumZoomScale: scrollView.minimumZoomScale,
+			directMouseMode: SettingsHandler.cursorMode == .direct
 		) else { return }
 		let zoom = scrollView.zoomScale
 		let visibleWidth = scrollView.bounds.width

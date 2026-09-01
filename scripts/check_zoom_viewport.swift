@@ -29,6 +29,26 @@ struct CheckZoomViewport {
 			true,
 			"active zoom remains constrained"
 		)
+		expect(
+			ZoomViewportPolicy.shouldRepositionForCursor(
+				zoomEnabled: true,
+				zoomScale: 1.5,
+				minimumZoomScale: 1.0,
+				directMouseMode: true
+			),
+			false,
+			"direct mouse mode preserves the viewport"
+		)
+		expect(
+			ZoomViewportPolicy.shouldRepositionForCursor(
+				zoomEnabled: true,
+				zoomScale: 1.5,
+				minimumZoomScale: 1.0,
+				directMouseMode: false
+			),
+			true,
+			"touchpad mode follows the cursor"
+		)
 
 		print("zoom viewport policy ok")
 	}
