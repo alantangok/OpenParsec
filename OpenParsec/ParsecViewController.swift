@@ -225,9 +225,6 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		}
 
 		touchController.viewDidLoad()
-		gamePadController.pointerInputStatusProvider = { [weak self] in
-			self?.pointerInputStatus()
-		}
 		gamePadController.gcmouseScrollHandler = { [weak self] axis, value in
 			self?.handleGCMouseScroll(axis: axis, rawValue: value)
 		}
@@ -618,14 +615,11 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 
 	private func sendAbsolutePointerPosition(_ pointerLocation: CGPoint) {
 		let visibleFrame = contentView.convert(contentView.bounds, to: view)
-		let status = pointerInputStatus()
+		guard ParsecBackgroundManager.shared.hasActiveConnection else { return }
 		guard let hostPosition = PointerPositionMapper.hostPosition(
 			pointerLocation: pointerLocation,
 			visibleFrame: visibleFrame,
-			contentSize: contentView.bounds.size,
-			windowIsFocused: status.windowIsFocused,
-			appIsActive: status.appIsActive,
-			sceneIsForegroundActive: status.sceneIsForegroundActive
+			contentSize: contentView.bounds.size
 		) else { return }
 
 		CParsec.sendMousePosition(Int32(hostPosition.x), Int32(hostPosition.y))

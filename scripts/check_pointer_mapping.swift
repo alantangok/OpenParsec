@@ -51,40 +51,6 @@ struct CheckPointerMapping {
 			"outside visible frame ignored"
 		)
 
-		expectNil(
-			PointerPositionMapper.hostPosition(
-				pointerLocation: CGPoint(x: 120, y: 90),
-				visibleFrame: visibleFrame,
-				contentSize: contentSize,
-				windowIsFocused: false
-			),
-			"unfocused window ignored"
-		)
-
-		expectNil(
-			PointerPositionMapper.hostPosition(
-				pointerLocation: CGPoint(x: 120, y: 90),
-				visibleFrame: visibleFrame,
-				contentSize: contentSize,
-				appIsActive: false
-			),
-			"inactive app ignored"
-		)
-
-		expectNil(
-			PointerPositionMapper.hostPosition(
-				pointerLocation: CGPoint(x: 120, y: 90),
-				visibleFrame: visibleFrame,
-				contentSize: contentSize,
-				sceneIsForegroundActive: false
-			),
-			"inactive scene ignored"
-		)
-
-		if PointerInputGate.isActive(windowIsFocused: true, appIsActive: false, sceneIsForegroundActive: true) {
-			fatalError("inactive app should block pointer input")
-		}
-
 		let pointerStatus = PointerInputStatus(
 			windowIsFocused: true,
 			appIsActive: false,
@@ -93,11 +59,11 @@ struct CheckPointerMapping {
 		if pointerStatus.isActive {
 			fatalError("inactive app status should not be active")
 		}
-		if GCMousePointerMapper.shouldSendRelativeMove(pointerHoverSupported: true) {
-			fatalError("gcmouse move should be blocked when absolute hover is supported")
+		if GCMousePointerMapper.shouldSendRelativeMove(hasActiveConnection: false) {
+			fatalError("gcmouse move should be blocked without a connection")
 		}
-		if !GCMousePointerMapper.shouldSendRelativeMove(pointerHoverSupported: false) {
-			fatalError("gcmouse move should be allowed without absolute hover support")
+		if !GCMousePointerMapper.shouldSendRelativeMove(hasActiveConnection: true) {
+			fatalError("connected gcmouse move should be allowed regardless of focus or hover support")
 		}
 		if GCMousePointerMapper.shouldSendButton(pointerButtonTouchSupported: true) {
 			fatalError("gcmouse buttons should be blocked when UIKit pointer buttons are supported")

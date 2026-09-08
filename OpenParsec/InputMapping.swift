@@ -171,17 +171,6 @@ enum PointerInputGate {
 		)
 	}
 
-	static func isActive(
-		windowIsFocused: Bool,
-		appIsActive: Bool,
-		sceneIsForegroundActive: Bool
-	) -> Bool {
-		return status(
-			windowIsFocused: windowIsFocused,
-			appIsActive: appIsActive,
-			sceneIsForegroundActive: sceneIsForegroundActive
-		).isActive
-	}
 }
 
 struct PointerInputStatus {
@@ -195,8 +184,8 @@ struct PointerInputStatus {
 }
 
 enum GCMousePointerMapper {
-	static func shouldSendRelativeMove(pointerHoverSupported: Bool) -> Bool {
-		return !pointerHoverSupported
+	static func shouldSendRelativeMove(hasActiveConnection: Bool) -> Bool {
+		return hasActiveConnection
 	}
 
 	static func shouldSendButton(pointerButtonTouchSupported: Bool) -> Bool {
@@ -208,18 +197,8 @@ enum PointerPositionMapper {
 	static func hostPosition(
 		pointerLocation: CGPoint,
 		visibleFrame: CGRect,
-		contentSize: CGSize,
-		windowIsFocused: Bool = true,
-		appIsActive: Bool = true,
-		sceneIsForegroundActive: Bool = true
+		contentSize: CGSize
 	) -> CGPoint? {
-		guard PointerInputGate.isActive(
-			windowIsFocused: windowIsFocused,
-			appIsActive: appIsActive,
-			sceneIsForegroundActive: sceneIsForegroundActive
-		) else {
-			return nil
-		}
 		guard visibleFrame.width > 0, visibleFrame.height > 0, contentSize.width > 0, contentSize.height > 0 else {
 			return nil
 		}
