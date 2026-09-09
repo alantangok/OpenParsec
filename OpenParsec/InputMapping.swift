@@ -159,15 +159,6 @@ enum ScrollInputGate {
 }
 
 enum PointerInputGate {
-	static func shouldSendMovement(
-		hasActiveConnection: Bool,
-		status: PointerInputStatus,
-		viewIsVisible: Bool,
-		isPiPActive: Bool
-	) -> Bool {
-		return hasActiveConnection && status.isActive && viewIsVisible && !isPiPActive
-	}
-
 	static func status(
 		windowIsFocused: Bool,
 		appIsActive: Bool,

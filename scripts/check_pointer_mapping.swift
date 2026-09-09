@@ -19,31 +19,6 @@ struct CheckPointerMapping {
 	}
 
 	static func main() {
-		let focused = PointerInputStatus(windowIsFocused: true, appIsActive: true, sceneIsForegroundActive: true)
-		let anotherWindow = PointerInputStatus(windowIsFocused: false, appIsActive: true, sceneIsForegroundActive: true)
-		let inactiveApp = PointerInputStatus(windowIsFocused: true, appIsActive: false, sceneIsForegroundActive: true)
-		let inactiveScene = PointerInputStatus(windowIsFocused: true, appIsActive: true, sceneIsForegroundActive: false)
-		let transitions: [(String, PointerInputStatus, Bool, Bool, Bool, Bool)] = [
-			("initial foreground", focused, true, false, true, true),
-			("another window focused", anotherWindow, true, false, true, false),
-			("refocus", focused, true, false, true, true),
-			("app switching", inactiveApp, true, false, true, false),
-			("scene still inactive", inactiveScene, true, false, true, false),
-			("app switch recovery", focused, true, false, true, true),
-			("PiP active despite foreground scene", focused, true, true, true, false),
-			("PiP stopped before view appears", focused, false, false, true, false),
-			("PiP restored", focused, true, false, true, true),
-			("disconnected", focused, true, false, false, false),
-			("reconnected", focused, true, false, true, true),
-		]
-		for (label, status, visible, pip, connected, expected) in transitions {
-			let allowed = PointerInputGate.shouldSendMovement(
-				hasActiveConnection: connected, status: status,
-				viewIsVisible: visible, isPiPActive: pip
-			)
-			if allowed != expected { fatalError("focus transition failed: \(label)") }
-		}
-
 		if PointerPositionMapper.shouldSendAbsoluteMove(pointerIsLocked: true, hasGCMouse: false) {
 			fatalError("locked pointer must not snap to UIKit absolute coordinates on click")
 		}
@@ -101,7 +76,7 @@ struct CheckPointerMapping {
 			fatalError("gcmouse move should be blocked without a connection")
 		}
 		if !GCMousePointerMapper.shouldSendRelativeMove(hasActiveConnection: true) {
-			fatalError("connected gcmouse passes connection eligibility before the controller focus gate")
+			fatalError("connected gcmouse move should be allowed regardless of focus or hover support")
 		}
 		if GCMousePointerMapper.shouldSendButton(pointerButtonTouchSupported: true) {
 			fatalError("gcmouse buttons should be blocked when UIKit pointer buttons are supported")
