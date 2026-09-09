@@ -19,6 +19,13 @@ struct CheckPointerMapping {
 	}
 
 	static func main() {
+		if PointerPositionMapper.shouldSendAbsoluteMove(pointerIsLocked: true) {
+			fatalError("locked pointer must not snap to UIKit absolute coordinates on click")
+		}
+		if !PointerPositionMapper.shouldSendAbsoluteMove(pointerIsLocked: false) {
+			fatalError("unlocked pointer must retain absolute hover movement")
+		}
+
 		let visibleFrame = CGRect(x: 20, y: 40, width: 200, height: 100)
 		let contentSize = CGSize(width: 1000, height: 500)
 

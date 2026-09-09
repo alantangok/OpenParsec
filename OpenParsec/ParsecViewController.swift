@@ -614,6 +614,9 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	}
 
 	private func sendAbsolutePointerPosition(_ pointerLocation: CGPoint) {
+		// Locked pointers move through GCMouse deltas; UIKit locations are not host positions.
+		let pointerIsLocked = view.window?.windowScene?.pointerLockState?.isLocked == true
+		guard PointerPositionMapper.shouldSendAbsoluteMove(pointerIsLocked: pointerIsLocked) else { return }
 		let visibleFrame = contentView.convert(contentView.bounds, to: view)
 		guard ParsecBackgroundManager.shared.hasActiveConnection else { return }
 		guard let hostPosition = PointerPositionMapper.hostPosition(
@@ -1261,7 +1264,7 @@ extension ParsecViewController: UIPointerInteractionDelegate {
 
 	func pointerInteraction(_ inter: UIPointerInteraction, regionFor request: UIPointerRegionRequest, defaultRegion: UIPointerRegion) -> UIPointerRegion? {
 		let loc = request.location
-		sendAbsolutePointerPosition(loc)
+		// Region queries also occur on clicks and must not reposition the host cursor.
 		if let iv = view!.hitTest(loc, with: nil) {
 			let rect = view!.convert(iv.bounds, from: iv)
 			let region = UIPointerRegion(rect: rect, identifier: iv.tag)

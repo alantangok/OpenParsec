@@ -194,6 +194,10 @@ enum GCMousePointerMapper {
 }
 
 enum PointerPositionMapper {
+	static func shouldSendAbsoluteMove(pointerIsLocked: Bool) -> Bool {
+		return !pointerIsLocked
+	}
+
 	static func hostPosition(
 		pointerLocation: CGPoint,
 		visibleFrame: CGRect,
