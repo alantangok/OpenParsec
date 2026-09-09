@@ -13,6 +13,7 @@ protocol ParsecPlayground {
 class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchInputDelegate {
 	var glkView: ParsecPlayground!
 	var gamePadController: GamepadController!
+	private var pointerViewIsVisible = false
 	var touchController: TouchController!
 	var u: UIImageView?
 	var lastImg: CGImage?
@@ -225,6 +226,9 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		}
 
 		touchController.viewDidLoad()
+		gamePadController.shouldForwardMouseMovement = { [weak self] in
+			self?.shouldForwardPointerMovement() == true
+		}
 		gamePadController.gcmouseScrollHandler = { [weak self] axis, value in
 			self?.handleGCMouseScroll(axis: axis, rawValue: value)
 		}
@@ -334,6 +338,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow), name: UIResponder.keyboardWillShowNotification, object: nil)
 		NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillHide), name: UIResponder.keyboardWillHideNotification, object: nil)
 		NotificationCenter.default.addObserver(self, selector: #selector(appWillResignActive), name: UIApplication.willResignActiveNotification, object: nil)
+		NotificationCenter.default.addObserver(self, selector: #selector(appDidBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
 		NotificationCenter.default.addObserver(self, selector: #selector(windowDidBecomeKey), name: UIWindow.didBecomeKeyNotification, object: nil)
 		NotificationCenter.default.addObserver(self, selector: #selector(sceneDidActivate), name: UIScene.didActivateNotification, object: nil)
 	}
@@ -342,12 +347,13 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
 		NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
 		NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
+		NotificationCenter.default.removeObserver(self, name: UIApplication.didBecomeActiveNotification, object: nil)
 		NotificationCenter.default.removeObserver(self, name: UIWindow.didBecomeKeyNotification, object: nil)
 		NotificationCenter.default.removeObserver(self, name: UIScene.didActivateNotification, object: nil)
 	}
 
 	private func requestPointerRelock() {
-		guard isViewLoaded, view.window != nil else { return }
+		guard shouldForwardPointerMovement() else { return }
 		if #available(iOS 13.4, *) {
 			pointerHoverGestureRecognizer?.isEnabled = false
 			pointerHoverGestureRecognizer?.isEnabled = true
@@ -373,6 +379,10 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 	@objc private func sceneDidActivate(_ notification: Notification) {
 		guard let scene = notification.object as? UIScene, scene === view.window?.windowScene else { return }
 		requestPointerRelock()
+	}
+
+	@objc private func appDidBecomeActive() {
+		restorePointerInputAfterPiP()
 	}
 
 	override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
@@ -415,6 +425,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 
 	override func viewDidAppear(_ animated: Bool) {
 		super.viewDidAppear(animated)
+		pointerViewIsVisible = true
 		if let parent = parent {
 			parent.setChildForHomeIndicatorAutoHidden(self)
 			parent.setChildViewControllerForPointerLock(self)
@@ -433,6 +444,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 
 	override func viewWillDisappear(_ animated: Bool) {
 		super.viewWillDisappear(animated)
+		pointerViewIsVisible = false
 		stopMomentum()
 		if let parent = parent {
 			parent.setChildForHomeIndicatorAutoHidden(nil)
@@ -614,6 +626,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	}
 
 	private func sendAbsolutePointerPosition(_ pointerLocation: CGPoint) {
+		guard shouldForwardPointerMovement() else { return }
 		// A connected mouse owns movement even when pointer lock changes on button release.
 		let pointerIsLocked = view.window?.windowScene?.pointerLockState?.isLocked == true
 		guard PointerPositionMapper.shouldSendAbsoluteMove(
@@ -636,6 +649,21 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 			windowIsFocused: view.window?.isKeyWindow == true,
 			appIsActive: UIApplication.shared.applicationState == .active,
 			sceneIsForegroundActive: view.window?.windowScene?.activationState == .foregroundActive
+		)
+	}
+
+	private func shouldForwardPointerMovement() -> Bool {
+		guard isViewLoaded else { return false }
+		var isPiPActive = false
+		if #available(iOS 15.0, *) {
+			isPiPActive = PictureInPictureManager.shared.isPiPActive
+		}
+		// Read current state for every event so app/scene/PiP transitions cannot latch input off.
+		return PointerInputGate.shouldSendMovement(
+			hasActiveConnection: ParsecBackgroundManager.shared.hasActiveConnection,
+			status: pointerInputStatus(),
+			viewIsVisible: pointerViewIsVisible,
+			isPiPActive: isPiPActive
 		)
 	}
 

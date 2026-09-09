@@ -10,6 +10,7 @@ class GamepadController {
     // private var panRecognizer: UIPanGestureRecognizer!
     weak var delegate: InputManagerDelegate?
 	var pointerButtonTouchSupported = false
+	var shouldForwardMouseMovement: () -> Bool = { false }
 	var gcmouseScrollHandler: ((GCMouseScrollAxis, Float) -> Void)?
 
     public func viewDidLoad() {
@@ -101,8 +102,9 @@ class GamepadController {
 				guard ParsecBackgroundManager.shared.hasActiveConnection else { return }
 				CParsec.sendMouseClickMessage(MOUSE_MIDDLE, pressed)
 				}
-			mouse.mouseInput?.mouseMovedHandler={ (_: GCMouseInput, v: Float, v2: Float) in
+			mouse.mouseInput?.mouseMovedHandler={ [weak self] (_: GCMouseInput, v: Float, v2: Float) in
 				guard GCMousePointerMapper.shouldSendRelativeMove(hasActiveConnection: ParsecBackgroundManager.shared.hasActiveConnection) else { return }
+				guard self?.shouldForwardMouseMovement() == true else { return }
 				CParsec.sendMouseDelta(Int32(v/1.25 * Float(SettingsHandler.mouseSensitivity)), Int32(-v2/1.25 * Float(SettingsHandler.mouseSensitivity)))
 				}
 			mouse.mouseInput?.scroll.yAxis.valueChangedHandler = {[weak self] (_: GCControllerAxisInput, value: Float) in
