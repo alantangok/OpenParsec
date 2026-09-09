@@ -1,1 +1,1 @@
-44eb2c9 | prevent trackpad clicks from resetting the host cursor
+b4ca8f9 | keep trackpad movement source stable across button release

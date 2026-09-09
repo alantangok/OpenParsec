@@ -19,11 +19,17 @@ struct CheckPointerMapping {
 	}
 
 	static func main() {
-		if PointerPositionMapper.shouldSendAbsoluteMove(pointerIsLocked: true) {
+		if PointerPositionMapper.shouldSendAbsoluteMove(pointerIsLocked: true, hasGCMouse: false) {
 			fatalError("locked pointer must not snap to UIKit absolute coordinates on click")
 		}
-		if !PointerPositionMapper.shouldSendAbsoluteMove(pointerIsLocked: false) {
+		if !PointerPositionMapper.shouldSendAbsoluteMove(pointerIsLocked: false, hasGCMouse: false) {
 			fatalError("unlocked pointer must retain absolute hover movement")
+		}
+		// Press, release/unlock, and hover resumption must keep the same movement source.
+		for pointerIsLocked in [true, false, false, true] {
+			if PointerPositionMapper.shouldSendAbsoluteMove(pointerIsLocked: pointerIsLocked, hasGCMouse: true) {
+				fatalError("connected trackpad must not drift to hover coordinates after button release")
+			}
 		}
 
 		let visibleFrame = CGRect(x: 20, y: 40, width: 200, height: 100)

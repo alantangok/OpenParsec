@@ -614,9 +614,12 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	}
 
 	private func sendAbsolutePointerPosition(_ pointerLocation: CGPoint) {
-		// Locked pointers move through GCMouse deltas; UIKit locations are not host positions.
+		// A connected mouse owns movement even when pointer lock changes on button release.
 		let pointerIsLocked = view.window?.windowScene?.pointerLockState?.isLocked == true
-		guard PointerPositionMapper.shouldSendAbsoluteMove(pointerIsLocked: pointerIsLocked) else { return }
+		guard PointerPositionMapper.shouldSendAbsoluteMove(
+			pointerIsLocked: pointerIsLocked,
+			hasGCMouse: !gamePadController.mice.isEmpty
+		) else { return }
 		let visibleFrame = contentView.convert(contentView.bounds, to: view)
 		guard ParsecBackgroundManager.shared.hasActiveConnection else { return }
 		guard let hostPosition = PointerPositionMapper.hostPosition(
