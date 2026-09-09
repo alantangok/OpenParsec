@@ -9,6 +9,7 @@ class GamepadController {
 	private(set) var mice = Set<GCMouse>()
     // private var panRecognizer: UIPanGestureRecognizer!
     weak var delegate: InputManagerDelegate?
+	var pointerInputStatusProvider: (() -> PointerInputStatus?)?
 	var pointerButtonTouchSupported = false
 	var gcmouseScrollHandler: ((GCMouseScrollAxis, Float) -> Void)?
 
@@ -101,8 +102,22 @@ class GamepadController {
 				guard ParsecBackgroundManager.shared.hasActiveConnection else { return }
 				CParsec.sendMouseClickMessage(MOUSE_MIDDLE, pressed)
 				}
-			mouse.mouseInput?.mouseMovedHandler={ (_: GCMouseInput, v: Float, v2: Float) in
-				guard GCMousePointerMapper.shouldSendRelativeMove(hasActiveConnection: ParsecBackgroundManager.shared.hasActiveConnection) else { return }
+			mouse.mouseInput?.mouseMovedHandler={[weak self] (_: GCMouseInput, v: Float, v2: Float) in
+				guard let status = self?.pointerInputStatus() else {
+					return
+				}
+				let pointerHoverSupported: Bool
+				if #available(iOS 13.4, *) {
+					pointerHoverSupported = true
+				} else {
+					pointerHoverSupported = false
+				}
+				guard GCMousePointerMapper.shouldSendRelativeMove(pointerHoverSupported: pointerHoverSupported) else {
+					return
+				}
+				guard status.isActive else {
+					return
+				}
 				CParsec.sendMouseDelta(Int32(v/1.25 * Float(SettingsHandler.mouseSensitivity)), Int32(-v2/1.25 * Float(SettingsHandler.mouseSensitivity)))
 				}
 			mouse.mouseInput?.scroll.yAxis.valueChangedHandler = {[weak self] (_: GCControllerAxisInput, value: Float) in
@@ -114,6 +129,10 @@ class GamepadController {
 				self?.gcmouseScrollHandler?(.x, value)
 			}
 		}
+	}
+
+	private func pointerInputStatus() -> PointerInputStatus? {
+		return pointerInputStatusProvider?()
 	}
 
 	@objc func didMouseConnectController(_ notification: Notification) {

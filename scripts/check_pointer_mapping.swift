@@ -19,17 +19,29 @@ struct CheckPointerMapping {
 	}
 
 	static func main() {
-		if PointerPositionMapper.shouldSendAbsoluteMove(pointerIsLocked: true, hasGCMouse: false) {
-			fatalError("locked pointer must not snap to UIKit absolute coordinates on click")
+		if PointerInputGate.prefersPointerLocked && !GCMousePointerMapper.shouldSendRelativeMove(pointerHoverSupported: true) {
+			fatalError("recovery must not lock the pointer while relative movement is blocked")
 		}
-		if !PointerPositionMapper.shouldSendAbsoluteMove(pointerIsLocked: false, hasGCMouse: false) {
-			fatalError("unlocked pointer must retain absolute hover movement")
-		}
-		// Press, release/unlock, and hover resumption must keep the same movement source.
-		for pointerIsLocked in [true, false, false, true] {
-			if PointerPositionMapper.shouldSendAbsoluteMove(pointerIsLocked: pointerIsLocked, hasGCMouse: true) {
-				fatalError("connected trackpad must not drift to hover coordinates after button release")
-			}
+
+		let recoveryStates: [(String, Bool, Bool, Bool, Bool)] = [
+			("focused", true, true, true, true),
+			("switch app", true, false, false, false),
+			("return before scene activation", true, true, false, false),
+			("app recovered", true, true, true, true),
+			("window unfocused", false, true, true, false),
+			("window refocused", true, true, true, true),
+			("PiP background", false, false, false, false),
+			("PiP restored", true, true, true, true),
+		]
+		for (label, focused, active, foreground, expected) in recoveryStates {
+			let position = PointerPositionMapper.hostPosition(
+				pointerLocation: CGPoint(x: 80, y: 60),
+				visibleFrame: CGRect(x: 0, y: 0, width: 200, height: 100),
+				contentSize: CGSize(width: 1000, height: 500),
+				windowIsFocused: focused, appIsActive: active, sceneIsForegroundActive: foreground
+			)
+			if expected { expect(position, CGPoint(x: 400, y: 300), label) }
+			else { expectNil(position, label) }
 		}
 
 		let visibleFrame = CGRect(x: 20, y: 40, width: 200, height: 100)
@@ -64,6 +76,40 @@ struct CheckPointerMapping {
 			"outside visible frame ignored"
 		)
 
+		expectNil(
+			PointerPositionMapper.hostPosition(
+				pointerLocation: CGPoint(x: 120, y: 90),
+				visibleFrame: visibleFrame,
+				contentSize: contentSize,
+				windowIsFocused: false
+			),
+			"unfocused window ignored"
+		)
+
+		expectNil(
+			PointerPositionMapper.hostPosition(
+				pointerLocation: CGPoint(x: 120, y: 90),
+				visibleFrame: visibleFrame,
+				contentSize: contentSize,
+				appIsActive: false
+			),
+			"inactive app ignored"
+		)
+
+		expectNil(
+			PointerPositionMapper.hostPosition(
+				pointerLocation: CGPoint(x: 120, y: 90),
+				visibleFrame: visibleFrame,
+				contentSize: contentSize,
+				sceneIsForegroundActive: false
+			),
+			"inactive scene ignored"
+		)
+
+		if PointerInputGate.isActive(windowIsFocused: true, appIsActive: false, sceneIsForegroundActive: true) {
+			fatalError("inactive app should block pointer input")
+		}
+
 		let pointerStatus = PointerInputStatus(
 			windowIsFocused: true,
 			appIsActive: false,
@@ -72,11 +118,11 @@ struct CheckPointerMapping {
 		if pointerStatus.isActive {
 			fatalError("inactive app status should not be active")
 		}
-		if GCMousePointerMapper.shouldSendRelativeMove(hasActiveConnection: false) {
-			fatalError("gcmouse move should be blocked without a connection")
+		if GCMousePointerMapper.shouldSendRelativeMove(pointerHoverSupported: true) {
+			fatalError("gcmouse move should be blocked when absolute hover is supported")
 		}
-		if !GCMousePointerMapper.shouldSendRelativeMove(hasActiveConnection: true) {
-			fatalError("connected gcmouse move should be allowed regardless of focus or hover support")
+		if !GCMousePointerMapper.shouldSendRelativeMove(pointerHoverSupported: false) {
+			fatalError("gcmouse move should be allowed without absolute hover support")
 		}
 		if GCMousePointerMapper.shouldSendButton(pointerButtonTouchSupported: true) {
 			fatalError("gcmouse buttons should be blocked when UIKit pointer buttons are supported")

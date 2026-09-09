@@ -87,7 +87,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 	private let gcmouseScrollStopSpeed: Float = 2
 
 	override var prefersPointerLocked: Bool {
-		return true
+		return PointerInputGate.prefersPointerLocked
 	}
 
 	override var prefersHomeIndicatorAutoHidden: Bool {
@@ -225,6 +225,9 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		}
 
 		touchController.viewDidLoad()
+		gamePadController.pointerInputStatusProvider = { [weak self] in
+			self?.pointerInputStatus()
+		}
 		gamePadController.gcmouseScrollHandler = { [weak self] axis, value in
 			self?.handleGCMouseScroll(axis: axis, rawValue: value)
 		}
@@ -334,6 +337,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow), name: UIResponder.keyboardWillShowNotification, object: nil)
 		NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillHide), name: UIResponder.keyboardWillHideNotification, object: nil)
 		NotificationCenter.default.addObserver(self, selector: #selector(appWillResignActive), name: UIApplication.willResignActiveNotification, object: nil)
+		NotificationCenter.default.addObserver(self, selector: #selector(appDidBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
 		NotificationCenter.default.addObserver(self, selector: #selector(windowDidBecomeKey), name: UIWindow.didBecomeKeyNotification, object: nil)
 		NotificationCenter.default.addObserver(self, selector: #selector(sceneDidActivate), name: UIScene.didActivateNotification, object: nil)
 	}
@@ -342,11 +346,12 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
 		NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
 		NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
+		NotificationCenter.default.removeObserver(self, name: UIApplication.didBecomeActiveNotification, object: nil)
 		NotificationCenter.default.removeObserver(self, name: UIWindow.didBecomeKeyNotification, object: nil)
 		NotificationCenter.default.removeObserver(self, name: UIScene.didActivateNotification, object: nil)
 	}
 
-	private func requestPointerRelock() {
+	private func refreshPointerInput() {
 		guard isViewLoaded, view.window != nil else { return }
 		if #available(iOS 13.4, *) {
 			pointerHoverGestureRecognizer?.isEnabled = false
@@ -356,23 +361,27 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		setNeedsUpdateOfPrefersPointerLocked()
 	}
 
-	func restorePointerInputAfterPiP() {
-		requestPointerRelock()
-		// PiP teardown completes after scene activation. Retry once after UIKit has restored
-		// the fullscreen window so the hover recognizer and pointer lock use its final state.
+	func restorePointerInput() {
+		refreshPointerInput()
+		// Activation and PiP teardown can precede the final window state. Refresh again
+		// on the next main-loop turn without requesting a lock that disables hover input.
 		DispatchQueue.main.async { [weak self] in
-			self?.requestPointerRelock()
+			self?.refreshPointerInput()
 		}
+	}
+
+	@objc private func appDidBecomeActive() {
+		restorePointerInput()
 	}
 
 	@objc private func windowDidBecomeKey(_ notification: Notification) {
 		guard let keyWindow = notification.object as? UIWindow, keyWindow === view.window else { return }
-		requestPointerRelock()
+		restorePointerInput()
 	}
 
 	@objc private func sceneDidActivate(_ notification: Notification) {
 		guard let scene = notification.object as? UIScene, scene === view.window?.windowScene else { return }
-		requestPointerRelock()
+		restorePointerInput()
 	}
 
 	override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
@@ -423,7 +432,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 			becomeFirstResponder()
 		}
 		// (Pinch-to-zoom is driven manually via touchOverlay; the scroll view's pinch stays off.)
-		requestPointerRelock()
+		restorePointerInput()
 	}
 
 	override func viewWillAppear(_ animated: Bool) {
@@ -614,18 +623,15 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	}
 
 	private func sendAbsolutePointerPosition(_ pointerLocation: CGPoint) {
-		// A connected mouse owns movement even when pointer lock changes on button release.
-		let pointerIsLocked = view.window?.windowScene?.pointerLockState?.isLocked == true
-		guard PointerPositionMapper.shouldSendAbsoluteMove(
-			pointerIsLocked: pointerIsLocked,
-			hasGCMouse: !gamePadController.mice.isEmpty
-		) else { return }
 		let visibleFrame = contentView.convert(contentView.bounds, to: view)
-		guard ParsecBackgroundManager.shared.hasActiveConnection else { return }
+		let status = pointerInputStatus()
 		guard let hostPosition = PointerPositionMapper.hostPosition(
 			pointerLocation: pointerLocation,
 			visibleFrame: visibleFrame,
-			contentSize: contentView.bounds.size
+			contentSize: contentView.bounds.size,
+			windowIsFocused: status.windowIsFocused,
+			appIsActive: status.appIsActive,
+			sceneIsForegroundActive: status.sceneIsForegroundActive
 		) else { return }
 
 		CParsec.sendMousePosition(Int32(hostPosition.x), Int32(hostPosition.y))
@@ -1267,7 +1273,7 @@ extension ParsecViewController: UIPointerInteractionDelegate {
 
 	func pointerInteraction(_ inter: UIPointerInteraction, regionFor request: UIPointerRegionRequest, defaultRegion: UIPointerRegion) -> UIPointerRegion? {
 		let loc = request.location
-		// Region queries also occur on clicks and must not reposition the host cursor.
+		sendAbsolutePointerPosition(loc)
 		if let iv = view!.hitTest(loc, with: nil) {
 			let rect = view!.convert(iv.bounds, from: iv)
 			let region = UIPointerRegion(rect: rect, identifier: iv.tag)

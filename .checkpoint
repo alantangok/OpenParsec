@@ -1,1 +1,1 @@
-83c385a | revert focus blocker to trackpad release behavior from 2cfc0a8
+990faaf | restore 229c145 baseline and keep hover input unlocked during recovery
