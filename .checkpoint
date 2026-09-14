@@ -1,1 +1,1 @@
-990faaf | restore 229c145 baseline and keep hover input unlocked during recovery
+05d6c65 | preserve combined branch while split PR work uses local worktrees
