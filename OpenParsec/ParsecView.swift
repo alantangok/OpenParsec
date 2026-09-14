@@ -176,7 +176,7 @@ struct ParsecView: View {
 
 		let save = SettingsHandler.saveSessionSettings
 		_muted = State(initialValue: SettingsHandler.startMuted || (save && SettingsHandler.savedMuted))
-		_zoomEnabled = State(initialValue: save ? SettingsHandler.savedZoomEnabled : false)
+		_zoomEnabled = State(initialValue: SettingsHandler.pinchZoomEnabled)
 		_constantFps = State(initialValue: save ? SettingsHandler.savedConstantFps : false)
 		_resolutions = State(initialValue: ParsecResolution.resolutions)
 		_bitrates = State(initialValue: ParsecResolution.bitrates)
@@ -565,7 +565,7 @@ struct ParsecView: View {
 		DispatchQueue.main.async {
 			zoomEnabled.toggle()
 			parsecViewController.setZoomEnabled(zoomEnabled)
-			if SettingsHandler.saveSessionSettings { SettingsHandler.savedZoomEnabled = zoomEnabled }
+			SettingsHandler.pinchZoomEnabled = zoomEnabled
 		}
 	}
 
