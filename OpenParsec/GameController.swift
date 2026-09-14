@@ -2,6 +2,61 @@ import UIKit
 import GameController
 import ParsecSDK
 
+struct PointerInputStatus {
+	let windowIsFocused: Bool
+	let appIsActive: Bool
+	let sceneIsForegroundActive: Bool
+
+	var isActive: Bool {
+		return windowIsFocused && appIsActive && sceneIsForegroundActive
+	}
+}
+
+enum PointerInputGate {
+	// Absolute hover input needs an unlocked system pointer.
+	static let prefersPointerLocked = false
+
+	static func status(
+		windowIsFocused: Bool,
+		appIsActive: Bool,
+		sceneIsForegroundActive: Bool
+	) -> PointerInputStatus {
+		return PointerInputStatus(
+			windowIsFocused: windowIsFocused,
+			appIsActive: appIsActive,
+			sceneIsForegroundActive: sceneIsForegroundActive
+		)
+	}
+}
+
+enum GCMousePointerMapper {
+	static func shouldSendRelativeMove(pointerHoverSupported: Bool) -> Bool {
+		return !pointerHoverSupported
+	}
+
+	static func shouldSendButton(pointerButtonTouchSupported: Bool) -> Bool {
+		return !pointerButtonTouchSupported
+	}
+}
+
+enum PointerPositionMapper {
+	static func hostPosition(
+		pointerLocation: CGPoint,
+		visibleFrame: CGRect,
+		contentSize: CGSize,
+		status: PointerInputStatus
+	) -> CGPoint? {
+		guard status.isActive else { return nil }
+		guard visibleFrame.width > 0, visibleFrame.height > 0,
+			  contentSize.width > 0, contentSize.height > 0 else { return nil }
+		guard visibleFrame.contains(pointerLocation) else { return nil }
+
+		let relativeX = (pointerLocation.x - visibleFrame.minX) / visibleFrame.width
+		let relativeY = (pointerLocation.y - visibleFrame.minY) / visibleFrame.height
+		return CGPoint(x: relativeX * contentSize.width, y: relativeY * contentSize.height)
+	}
+}
+
 class GamepadController {
 
     private let maximumControllerCount: Int = 1
@@ -9,6 +64,8 @@ class GamepadController {
 	private(set) var mice = Set<GCMouse>()
     // private var panRecognizer: UIPanGestureRecognizer!
     weak var delegate: InputManagerDelegate?
+	var pointerInputStatusProvider: (() -> PointerInputStatus?)?
+	var pointerButtonTouchSupported = false
 
     public func viewDidLoad() {
 
@@ -82,21 +139,33 @@ class GamepadController {
 	func registerMouseHandler() {
 		for mouse in GCMouse.mice() {
 			mice.insert(mouse)
-			mouse.mouseInput?.leftButton.pressedChangedHandler = {(_: GCControllerButtonInput, _: Float, pressed: Bool) in
+			mouse.mouseInput?.leftButton.pressedChangedHandler = {[weak self] (_: GCControllerButtonInput, _: Float, pressed: Bool) in
+				guard GCMousePointerMapper.shouldSendButton(pointerButtonTouchSupported: self?.pointerButtonTouchSupported == true) else { return }
 				guard ParsecBackgroundManager.shared.hasActiveConnection else { return }
 				CParsec.sendMouseClickMessage(MOUSE_L, pressed)
 				}
-			mouse.mouseInput?.rightButton?.pressedChangedHandler = {(_: GCControllerButtonInput, _: Float, pressed: Bool) in
+			mouse.mouseInput?.rightButton?.pressedChangedHandler = {[weak self] (_: GCControllerButtonInput, _: Float, pressed: Bool) in
+				guard GCMousePointerMapper.shouldSendButton(pointerButtonTouchSupported: self?.pointerButtonTouchSupported == true) else { return }
 				// pointer-lock toggles on the connect/disconnect view swap can synthesize a button edge
 				// with no real input — dont forward it unless a session is actually live
 				guard ParsecBackgroundManager.shared.hasActiveConnection else { return }
 				CParsec.sendMouseClickMessage(MOUSE_R, pressed)
 				}
-			mouse.mouseInput?.middleButton?.pressedChangedHandler = {(_: GCControllerButtonInput, _: Float, pressed: Bool) in
+			mouse.mouseInput?.middleButton?.pressedChangedHandler = {[weak self] (_: GCControllerButtonInput, _: Float, pressed: Bool) in
+				guard GCMousePointerMapper.shouldSendButton(pointerButtonTouchSupported: self?.pointerButtonTouchSupported == true) else { return }
 				guard ParsecBackgroundManager.shared.hasActiveConnection else { return }
 				CParsec.sendMouseClickMessage(MOUSE_MIDDLE, pressed)
 				}
-			mouse.mouseInput?.mouseMovedHandler={(_: GCMouseInput, v: Float, v2: Float) in
+			mouse.mouseInput?.mouseMovedHandler={[weak self] (_: GCMouseInput, v: Float, v2: Float) in
+				guard let status = self?.pointerInputStatusProvider?(), status.isActive else { return }
+				let pointerHoverSupported: Bool
+				if #available(iOS 13.4, *) {
+					pointerHoverSupported = true
+				} else {
+					pointerHoverSupported = false
+				}
+				guard GCMousePointerMapper.shouldSendRelativeMove(pointerHoverSupported: pointerHoverSupported) else { return }
+				guard ParsecBackgroundManager.shared.hasActiveConnection else { return }
 				CParsec.sendMouseDelta(Int32(v/1.25 * Float(SettingsHandler.mouseSensitivity)), Int32(-v2/1.25 * Float(SettingsHandler.mouseSensitivity)))
 				}
 			mouse.mouseInput?.scroll.yAxis.valueChangedHandler = {(_: GCControllerAxisInput, value: Float) in

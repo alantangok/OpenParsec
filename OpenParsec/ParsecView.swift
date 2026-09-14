@@ -413,6 +413,7 @@ struct ParsecView: View {
 					CParsec.pause()
 					ParsecBackgroundManager.shared.isPaused = true
 				} else {
+					parsecViewController.restorePointerInput()
 					if ParsecBackgroundManager.shared.isReconnecting {
 						return
 					}
