@@ -2,6 +2,130 @@ import UIKit
 import GameController
 import ParsecSDK
 
+struct ScrollWheel {
+	let x: Int32
+	let y: Int32
+}
+
+enum GCMouseScrollAxis {
+	case x
+	case y
+}
+
+enum GCMouseScrollMapper {
+	static func adjustedDelta(axis: GCMouseScrollAxis, rawValue: Float, naturalScrolling: Bool) -> (x: Float, y: Float) {
+		let direction: Float = naturalScrolling ? -1.0 : 1.0
+		let adjusted = rawValue * direction
+		switch axis {
+		case .x:
+			return (x: 0, y: adjusted)
+		case .y:
+			return (x: adjusted, y: 0)
+		}
+	}
+}
+
+struct GCMouseScrollMotion {
+	private var accumulatedX: Float = 0
+	private var accumulatedY: Float = 0
+	private(set) var velocityX: Float = 0
+	private(set) var velocityY: Float = 0
+	private(set) var lastEventTime: TimeInterval?
+
+	mutating func consume(
+		axis: GCMouseScrollAxis,
+		rawValue: Float,
+		naturalScrolling: Bool,
+		at time: TimeInterval
+	) -> ScrollWheel {
+		let delta = GCMouseScrollMapper.adjustedDelta(
+			axis: axis,
+			rawValue: rawValue,
+			naturalScrolling: naturalScrolling
+		)
+
+		if let lastEventTime {
+			let elapsed = Float(time - lastEventTime)
+			if elapsed > 0.0005 && elapsed < 0.1 {
+				switch axis {
+				case .x:
+					velocityY = velocityY * 0.4 + (delta.y / elapsed) * 0.6
+				case .y:
+					velocityX = velocityX * 0.4 + (delta.x / elapsed) * 0.6
+				}
+			} else if elapsed >= 0.1 {
+				velocityX = 0
+				velocityY = 0
+			}
+		}
+		lastEventTime = time
+
+		return accumulate(deltaX: delta.x, deltaY: delta.y)
+	}
+
+	mutating func momentumWheel(deltaTime: Float, decayPerSecond: Double) -> ScrollWheel {
+		let decay = Float(pow(decayPerSecond, Double(deltaTime)))
+		velocityX *= decay
+		velocityY *= decay
+		return accumulate(deltaX: velocityX * deltaTime, deltaY: velocityY * deltaTime)
+	}
+
+	func shouldStartMomentum(minimumSpeed: Float) -> Bool {
+		return speed >= minimumSpeed
+	}
+
+	func shouldStopMomentum(maximumSpeed: Float) -> Bool {
+		return speed < maximumSpeed
+	}
+
+	mutating func reset() {
+		accumulatedX = 0
+		accumulatedY = 0
+		velocityX = 0
+		velocityY = 0
+		lastEventTime = nil
+	}
+
+	private var speed: Float {
+		return sqrt(velocityX * velocityX + velocityY * velocityY)
+	}
+
+	private mutating func accumulate(deltaX: Float, deltaY: Float) -> ScrollWheel {
+		accumulatedX += deltaX
+		accumulatedY += deltaY
+		let wheel = ScrollWheel(x: Int32(accumulatedX), y: Int32(accumulatedY))
+		accumulatedX -= Float(wheel.x)
+		accumulatedY -= Float(wheel.y)
+		return wheel
+	}
+}
+
+enum ScrollInputGate {
+	private static let trackpadSuppressionWindow: TimeInterval = 0.20
+	private static var lastGCMouseScrollTime: TimeInterval?
+
+	static func recordGCMouseScroll(at time: TimeInterval = Date().timeIntervalSinceReferenceDate) {
+		lastGCMouseScrollTime = time
+	}
+
+	static func shouldSendTrackpadScroll(at time: TimeInterval = Date().timeIntervalSinceReferenceDate) -> Bool {
+		guard let lastGCMouseScrollTime else {
+			return true
+		}
+
+		return time - lastGCMouseScrollTime >= trackpadSuppressionWindow
+	}
+}
+
+enum ScrollWheelMapper {
+	private static let wheelDivisor: Float = 20.0
+
+	static func wheelScale(sensitivity: Float, naturalScrolling: Bool) -> Float {
+		let direction: Float = naturalScrolling ? -1.0 : 1.0
+		return sensitivity * direction / wheelDivisor
+	}
+}
+
 class GamepadController {
 
     private let maximumControllerCount: Int = 1
@@ -9,6 +133,7 @@ class GamepadController {
 	private(set) var mice = Set<GCMouse>()
     // private var panRecognizer: UIPanGestureRecognizer!
     weak var delegate: InputManagerDelegate?
+	var gcmouseScrollHandler: ((GCMouseScrollAxis, Float) -> Void)?
 
     public func viewDidLoad() {
 
@@ -99,11 +224,13 @@ class GamepadController {
 			mouse.mouseInput?.mouseMovedHandler={(_: GCMouseInput, v: Float, v2: Float) in
 				CParsec.sendMouseDelta(Int32(v/1.25 * Float(SettingsHandler.mouseSensitivity)), Int32(-v2/1.25 * Float(SettingsHandler.mouseSensitivity)))
 				}
-			mouse.mouseInput?.scroll.yAxis.valueChangedHandler = {(_: GCControllerAxisInput, value: Float) in
-				CParsec.sendWheelMsg(x: Int32(value), y: 0)
+			mouse.mouseInput?.scroll.yAxis.valueChangedHandler = {[weak self] (_: GCControllerAxisInput, value: Float) in
+				ScrollInputGate.recordGCMouseScroll()
+				self?.gcmouseScrollHandler?(.y, value)
 			}
-			mouse.mouseInput?.scroll.xAxis.valueChangedHandler = {(_: GCControllerAxisInput, value: Float) in
-				CParsec.sendWheelMsg(x: 0, y: Int32(value))
+			mouse.mouseInput?.scroll.xAxis.valueChangedHandler = {[weak self] (_: GCControllerAxisInput, value: Float) in
+				ScrollInputGate.recordGCMouseScroll()
+				self?.gcmouseScrollHandler?(.x, value)
 			}
 		}
 	}
