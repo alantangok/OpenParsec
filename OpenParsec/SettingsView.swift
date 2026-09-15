@@ -11,7 +11,7 @@ struct SettingsView: View {
 	@AppStorage("cursorScale") var cursorScale: Double = 0.5
 	@AppStorage("mouseSensitivity") var mouseSensitivity: Double = 1.0
 	@AppStorage("optionAsCommand") var optionAsCommand: Bool = false
-	@AppStorage("savedZoomEnabled") var pinchZoomEnabled: Bool = false
+	@AppStorage("pinchZoomEnabled") var pinchZoomEnabled: Bool = false
 	@AppStorage("noOverlay") var noOverlay: Bool = false
 	@AppStorage("hideStatusBar") var hideStatusBar: Bool = true
 	@AppStorage("rightClickPosition") var rightClickPosition: RightClickPosition = .firstFinger

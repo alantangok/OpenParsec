@@ -476,7 +476,11 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 
 	@objc func keyboardWillShow(notification: NSNotification) {
 		if let keyboardFrame = (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue {
-            let height = keyboardFrame.height
+			let keyboardFrameInView = view.convert(keyboardFrame, from: nil)
+			let scrollFrameInView = scrollView.convert(scrollView.bounds, to: view)
+			let intersection = scrollFrameInView.intersection(keyboardFrameInView)
+			let coversBottomEdge = !intersection.isNull && intersection.maxY >= scrollFrameInView.maxY - 1
+			let height = coversBottomEdge ? intersection.height : 0
 			keyboardHeight = height
             keyboardVisible = true
 
@@ -494,6 +498,15 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
                  scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: newOffsetY), animated: true)
 
             }
+			if shouldConstrainViewport(at: scrollView.zoomScale) {
+				if SettingsHandler.cursorMode == .direct {
+					let offset = clampViewportOffset(scrollView.contentOffset, zoom: scrollView.zoomScale)
+					scrollView.setContentOffset(offset, animated: false)
+				} else {
+					repositionViewportForCursor()
+				}
+				positionCursorOverlay()
+			}
 		}
 		onKeyboardVisibilityChanged?(true)
 	}
@@ -516,6 +529,11 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
              // User said "bajar la altura", implying a reverse scroll.
              scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: newOffsetY), animated: true)
         }
+		if shouldConstrainViewport(at: scrollView.zoomScale) {
+			let offset = clampViewportOffset(scrollView.contentOffset, zoom: scrollView.zoomScale)
+			scrollView.setContentOffset(offset, animated: false)
+			positionCursorOverlay()
+		}
 		onKeyboardVisibilityChanged?(false)
 	}
 
@@ -866,10 +884,17 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 		return zoomEnabled && zoom > scrollView.minimumZoomScale + originalScaleTolerance
 	}
 
+	private func effectiveVisibleViewport() -> CGSize {
+		let bounds = scrollView.bounds.size
+		guard keyboardVisible, keyboardHeight > 0 else { return bounds }
+		let bottomInset = max(keyboardHeight, scrollView.adjustedContentInset.bottom)
+		return CGSize(width: bounds.width, height: max(0, bounds.height - bottomInset))
+	}
+
 	private func clampViewportOffset(_ proposed: CGPoint, zoom: CGFloat) -> CGPoint {
 		guard shouldConstrainViewport(at: zoom) else { return proposed }
 
-		let viewport = scrollView.bounds.size
+		let viewport = effectiveVisibleViewport()
 		let hostRect = hostContentRect()
 		func clampAxis(
 			_ value: CGFloat,
@@ -1002,8 +1027,9 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 		guard SettingsHandler.cursorMode != .direct,
 			  shouldConstrainViewport(at: scrollView.zoomScale) else { return }
 		let zoom = scrollView.zoomScale
-		let visibleWidth = scrollView.bounds.width
-		let visibleHeight = scrollView.bounds.height
+		let viewport = effectiveVisibleViewport()
+		let visibleWidth = viewport.width
+		let visibleHeight = viewport.height
 		let cursorX = cursorContentPos.x * zoom
 		let cursorY = cursorContentPos.y * zoom
 		let marginX = min(96, visibleWidth * 0.18)

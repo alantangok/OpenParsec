@@ -176,6 +176,7 @@ struct ParsecView: View {
 
 		let save = SettingsHandler.saveSessionSettings
 		_muted = State(initialValue: SettingsHandler.startMuted || (save && SettingsHandler.savedMuted))
+		// Pinch zoom is an input preference, independent of per-session state saving.
 		_zoomEnabled = State(initialValue: SettingsHandler.pinchZoomEnabled)
 		_constantFps = State(initialValue: save ? SettingsHandler.savedConstantFps : false)
 		_resolutions = State(initialValue: ParsecResolution.resolutions)
@@ -565,6 +566,7 @@ struct ParsecView: View {
 		DispatchQueue.main.async {
 			zoomEnabled.toggle()
 			parsecViewController.setZoomEnabled(zoomEnabled)
+			// Keep the input preference persistent even when session-state saving is disabled.
 			SettingsHandler.pinchZoomEnabled = zoomEnabled
 		}
 	}
