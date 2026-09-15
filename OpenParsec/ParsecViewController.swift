@@ -77,12 +77,6 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 	private var lastTrackpadScrollTranslation: CGPoint = .zero
 	private var accumulatedTrackpadScrollX: Float = 0
 	private var accumulatedTrackpadScrollY: Float = 0
-	private var gcmouseScrollMotion = GCMouseScrollMotion()
-	private var gcmouseScrollTracking = false
-	private var gcmouseScrollMomentumActive = false
-	private let gcmouseScrollIdleDelay: TimeInterval = 0.05
-	private let gcmouseScrollStartSpeed: Float = 20
-	private let gcmouseScrollStopSpeed: Float = 2
 
 	override var prefersPointerLocked: Bool {
 		return true
@@ -222,9 +216,6 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		}
 
 		touchController.viewDidLoad()
-		gamePadController.gcmouseScrollHandler = { [weak self] axis, value in
-			self?.handleGCMouseScroll(axis: axis, rawValue: value)
-		}
 		gamePadController.viewDidLoad()
 
 		// Touch overlay: a transparent sibling ON TOP of the scroll view (and above the gamepad /
@@ -545,6 +536,13 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	@available(iOS 13.4, *)
 	@objc func handleTrackpadScroll(_ gestureRecognizer: UIPanGestureRecognizer) {
 		let translation = gestureRecognizer.translation(in: gestureRecognizer.view)
+		guard !gamePadController.hasMouseScrollSource else {
+			lastTrackpadScrollTranslation = translation
+			accumulatedTrackpadScrollX = 0
+			accumulatedTrackpadScrollY = 0
+			return
+		}
+
 		switch gestureRecognizer.state {
 		case .began:
 			lastTrackpadScrollTranslation = translation
@@ -555,14 +553,8 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 			let deltaY = Float(translation.y - lastTrackpadScrollTranslation.y)
 			lastTrackpadScrollTranslation = translation
 
-			guard ScrollInputGate.shouldSendTrackpadScroll() else {
-				accumulatedTrackpadScrollX = 0
-				accumulatedTrackpadScrollY = 0
-				return
-			}
-
 			let scale = ScrollWheelMapper.wheelScale(
-				sensitivity: mouseSensitivity,
+				sensitivity: Float(SettingsHandler.scrollSensitivity),
 				naturalScrolling: SettingsHandler.naturalScrolling
 			)
 			accumulatedTrackpadScrollX += deltaX * scale
@@ -582,24 +574,6 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 		default:
 			break
 		}
-	}
-
-	private func handleGCMouseScroll(axis: GCMouseScrollAxis, rawValue: Float) {
-		let now = CACurrentMediaTime()
-		gcmouseScrollTracking = true
-		gcmouseScrollMomentumActive = false
-		scrollMomentumActive = false
-
-		let wheel = gcmouseScrollMotion.consume(
-			axis: axis,
-			rawValue: rawValue,
-			naturalScrolling: SettingsHandler.naturalScrolling,
-			at: now
-		)
-		if wheel.x != 0 || wheel.y != 0 {
-			CParsec.sendWheelMsg(x: wheel.x, y: wheel.y)
-		}
-		ensureMomentumLink()
 	}
 
 	func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -857,9 +831,6 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	func stopMomentum() {
 		cursorMomentumActive = false
 		scrollMomentumActive = false
-		gcmouseScrollTracking = false
-		gcmouseScrollMomentumActive = false
-		gcmouseScrollMotion.reset()
 		cursorVelocity = .zero
 		scrollVelocity = 0
 		momentumLink?.invalidate()
@@ -901,37 +872,6 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 			}
 			if abs(scrollVelocity) < scrollStopSpeed {
 				scrollMomentumActive = false
-			} else {
-				stillActive = true
-			}
-		}
-
-		if gcmouseScrollTracking {
-			if let lastEventTime = gcmouseScrollMotion.lastEventTime,
-			   CACurrentMediaTime() - lastEventTime < gcmouseScrollIdleDelay {
-				stillActive = true
-			} else {
-				gcmouseScrollTracking = false
-				gcmouseScrollMomentumActive = gcmouseScrollMotion.shouldStartMomentum(
-					minimumSpeed: gcmouseScrollStartSpeed
-				)
-				if !gcmouseScrollMomentumActive {
-					gcmouseScrollMotion.reset()
-				}
-			}
-		}
-
-		if gcmouseScrollMomentumActive {
-			let wheel = gcmouseScrollMotion.momentumWheel(
-				deltaTime: Float(dt),
-				decayPerSecond: scrollDecayPerSec
-			)
-			if wheel.x != 0 || wheel.y != 0 {
-				CParsec.sendWheelMsg(x: wheel.x, y: wheel.y)
-			}
-			if gcmouseScrollMotion.shouldStopMomentum(maximumSpeed: gcmouseScrollStopSpeed) {
-				gcmouseScrollMomentumActive = false
-				gcmouseScrollMotion.reset()
 			} else {
 				stillActive = true
 			}

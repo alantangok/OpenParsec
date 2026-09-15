@@ -25,69 +25,27 @@ enum GCMouseScrollMapper {
 	}
 }
 
-struct GCMouseScrollMotion {
+struct GCMouseScrollAccumulator {
 	private var accumulatedX: Float = 0
 	private var accumulatedY: Float = 0
-	private(set) var velocityX: Float = 0
-	private(set) var velocityY: Float = 0
-	private(set) var lastEventTime: TimeInterval?
 
 	mutating func consume(
 		axis: GCMouseScrollAxis,
 		rawValue: Float,
-		naturalScrolling: Bool,
-		at time: TimeInterval
+		sensitivity: Float,
+		naturalScrolling: Bool
 	) -> ScrollWheel {
 		let delta = GCMouseScrollMapper.adjustedDelta(
 			axis: axis,
 			rawValue: rawValue,
 			naturalScrolling: naturalScrolling
 		)
-
-		if let lastEventTime {
-			let elapsed = Float(time - lastEventTime)
-			if elapsed > 0.0005 && elapsed < 0.1 {
-				switch axis {
-				case .x:
-					velocityY = velocityY * 0.4 + (delta.y / elapsed) * 0.6
-				case .y:
-					velocityX = velocityX * 0.4 + (delta.x / elapsed) * 0.6
-				}
-			} else if elapsed >= 0.1 {
-				velocityX = 0
-				velocityY = 0
-			}
-		}
-		lastEventTime = time
-
-		return accumulate(deltaX: delta.x, deltaY: delta.y)
-	}
-
-	mutating func momentumWheel(deltaTime: Float, decayPerSecond: Double) -> ScrollWheel {
-		let decay = Float(pow(decayPerSecond, Double(deltaTime)))
-		velocityX *= decay
-		velocityY *= decay
-		return accumulate(deltaX: velocityX * deltaTime, deltaY: velocityY * deltaTime)
-	}
-
-	func shouldStartMomentum(minimumSpeed: Float) -> Bool {
-		return speed >= minimumSpeed
-	}
-
-	func shouldStopMomentum(maximumSpeed: Float) -> Bool {
-		return speed < maximumSpeed
+		return accumulate(deltaX: delta.x * sensitivity, deltaY: delta.y * sensitivity)
 	}
 
 	mutating func reset() {
 		accumulatedX = 0
 		accumulatedY = 0
-		velocityX = 0
-		velocityY = 0
-		lastEventTime = nil
-	}
-
-	private var speed: Float {
-		return sqrt(velocityX * velocityX + velocityY * velocityY)
 	}
 
 	private mutating func accumulate(deltaX: Float, deltaY: Float) -> ScrollWheel {
@@ -97,23 +55,6 @@ struct GCMouseScrollMotion {
 		accumulatedX -= Float(wheel.x)
 		accumulatedY -= Float(wheel.y)
 		return wheel
-	}
-}
-
-enum ScrollInputGate {
-	private static let trackpadSuppressionWindow: TimeInterval = 0.20
-	private static var lastGCMouseScrollTime: TimeInterval?
-
-	static func recordGCMouseScroll(at time: TimeInterval = Date().timeIntervalSinceReferenceDate) {
-		lastGCMouseScrollTime = time
-	}
-
-	static func shouldSendTrackpadScroll(at time: TimeInterval = Date().timeIntervalSinceReferenceDate) -> Bool {
-		guard let lastGCMouseScrollTime else {
-			return true
-		}
-
-		return time - lastGCMouseScrollTime >= trackpadSuppressionWindow
 	}
 }
 
@@ -131,9 +72,10 @@ class GamepadController {
     private let maximumControllerCount: Int = 1
     private(set) var controllers = Set<GCController>()
 	private(set) var mice = Set<GCMouse>()
+	private var mouseScrollAccumulator = GCMouseScrollAccumulator()
     // private var panRecognizer: UIPanGestureRecognizer!
     weak var delegate: InputManagerDelegate?
-	var gcmouseScrollHandler: ((GCMouseScrollAxis, Float) -> Void)?
+	var hasMouseScrollSource: Bool { !mice.isEmpty }
 
     public func viewDidLoad() {
 
@@ -206,32 +148,43 @@ class GamepadController {
 
 	func registerMouseHandler() {
 		for mouse in GCMouse.mice() {
+			guard let mouseInput = mouse.mouseInput else { continue }
 			mice.insert(mouse)
-			mouse.mouseInput?.leftButton.pressedChangedHandler = {(_: GCControllerButtonInput, _: Float, pressed: Bool) in
+			mouseInput.leftButton.pressedChangedHandler = {(_: GCControllerButtonInput, _: Float, pressed: Bool) in
 				guard ParsecBackgroundManager.shared.hasActiveConnection else { return }
 				CParsec.sendMouseClickMessage(MOUSE_L, pressed)
 				}
-			mouse.mouseInput?.rightButton?.pressedChangedHandler = {(_: GCControllerButtonInput, _: Float, pressed: Bool) in
+			mouseInput.rightButton?.pressedChangedHandler = {(_: GCControllerButtonInput, _: Float, pressed: Bool) in
 				// pointer-lock toggles on the connect/disconnect view swap can synthesize a button edge
 				// with no real input — dont forward it unless a session is actually live
 				guard ParsecBackgroundManager.shared.hasActiveConnection else { return }
 				CParsec.sendMouseClickMessage(MOUSE_R, pressed)
 				}
-			mouse.mouseInput?.middleButton?.pressedChangedHandler = {(_: GCControllerButtonInput, _: Float, pressed: Bool) in
+			mouseInput.middleButton?.pressedChangedHandler = {(_: GCControllerButtonInput, _: Float, pressed: Bool) in
 				guard ParsecBackgroundManager.shared.hasActiveConnection else { return }
 				CParsec.sendMouseClickMessage(MOUSE_MIDDLE, pressed)
 				}
-			mouse.mouseInput?.mouseMovedHandler={(_: GCMouseInput, v: Float, v2: Float) in
+			mouseInput.mouseMovedHandler={(_: GCMouseInput, v: Float, v2: Float) in
 				CParsec.sendMouseDelta(Int32(v/1.25 * Float(SettingsHandler.mouseSensitivity)), Int32(-v2/1.25 * Float(SettingsHandler.mouseSensitivity)))
 				}
-			mouse.mouseInput?.scroll.yAxis.valueChangedHandler = {[weak self] (_: GCControllerAxisInput, value: Float) in
-				ScrollInputGate.recordGCMouseScroll()
-				self?.gcmouseScrollHandler?(.y, value)
+			mouseInput.scroll.yAxis.valueChangedHandler = {[weak self] (_: GCControllerAxisInput, value: Float) in
+				self?.sendMouseScroll(axis: .y, rawValue: value)
 			}
-			mouse.mouseInput?.scroll.xAxis.valueChangedHandler = {[weak self] (_: GCControllerAxisInput, value: Float) in
-				ScrollInputGate.recordGCMouseScroll()
-				self?.gcmouseScrollHandler?(.x, value)
+			mouseInput.scroll.xAxis.valueChangedHandler = {[weak self] (_: GCControllerAxisInput, value: Float) in
+				self?.sendMouseScroll(axis: .x, rawValue: value)
 			}
+		}
+	}
+
+	private func sendMouseScroll(axis: GCMouseScrollAxis, rawValue: Float) {
+		let wheel = mouseScrollAccumulator.consume(
+			axis: axis,
+			rawValue: rawValue,
+			sensitivity: Float(SettingsHandler.scrollSensitivity),
+			naturalScrolling: SettingsHandler.naturalScrolling
+		)
+		if wheel.x != 0 || wheel.y != 0 {
+			CParsec.sendWheelMsg(x: wheel.x, y: wheel.y)
 		}
 	}
 
@@ -242,6 +195,9 @@ class GamepadController {
 	@objc func didMouseDisconnectController(_ notification: Notification) {
 		guard let mouse = notification.object as? GCMouse else { return }
 		mice.remove(mouse)
+		if mice.isEmpty {
+			mouseScrollAccumulator.reset()
+		}
 	}
 
     @objc func didConnectController(_ notification: Notification) {
