@@ -5,6 +5,10 @@ import os
 
 let sdkLog = OSLog(subsystem: "com.aigch.OpenParsec", category: "sdk")
 
+extension Notification.Name {
+	static let parsecPointerModeDidChange = Notification.Name("parsecPointerModeDidChange")
+}
+
 enum RendererType: Int {
 	case opengl
     case metal
@@ -92,6 +96,7 @@ class ParsecSDKBridge: ParsecService {
 	}
 
 	func connect(_ peerID: String) -> ParsecStatus {
+		setPointerRelativeMode(false)
 
 		var parsecClientCfg = ParsecClientConfig()
 		parsecClientCfg.video.0.decoderIndex = 1
@@ -290,7 +295,7 @@ class ParsecSDKBridge: ParsecService {
 	func handleCursorEvent(event: ParsecClientCursorEvent) {
 		let prevHidden = mouseInfo.cursorHidden
 		mouseInfo.cursorHidden = event.cursor.hidden
-		mouseInfo.mousePositionRelative = event.cursor.relative
+		setPointerRelativeMode(event.cursor.relative)
 
 		if event.cursor.imageUpdate || !getFirstCursor {
 			getFirstCursor = true
@@ -323,6 +328,14 @@ class ParsecSDKBridge: ParsecService {
 				mouseInfo.cursorImg = cgimage
 			}
 			ParsecFree(pointer)
+		}
+	}
+
+	private func setPointerRelativeMode(_ isRelative: Bool) {
+		guard mouseInfo.mousePositionRelative != isRelative else { return }
+		mouseInfo.mousePositionRelative = isRelative
+		DispatchQueue.main.async {
+			NotificationCenter.default.post(name: .parsecPointerModeDidChange, object: nil)
 		}
 	}
 

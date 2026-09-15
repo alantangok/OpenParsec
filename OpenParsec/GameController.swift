@@ -13,8 +13,12 @@ struct PointerInputStatus {
 }
 
 enum PointerInputGate {
-	// Absolute hover input needs an unlocked system pointer.
-	static let prefersPointerLocked = false
+	static func prefersPointerLocked(
+		hostUsesRelativePointer: Bool,
+		status: PointerInputStatus
+	) -> Bool {
+		return hostUsesRelativePointer && status.isActive
+	}
 
 	static func status(
 		windowIsFocused: Bool,
@@ -30,8 +34,8 @@ enum PointerInputGate {
 }
 
 enum GCMousePointerMapper {
-	static func shouldSendRelativeMove(pointerHoverSupported: Bool) -> Bool {
-		return !pointerHoverSupported
+	static func shouldSendRelativeMove(hostUsesRelativePointer: Bool) -> Bool {
+		return hostUsesRelativePointer
 	}
 
 	static func shouldSendButton(pointerButtonTouchSupported: Bool) -> Bool {
@@ -65,6 +69,7 @@ class GamepadController {
     // private var panRecognizer: UIPanGestureRecognizer!
     weak var delegate: InputManagerDelegate?
 	var pointerInputStatusProvider: (() -> PointerInputStatus?)?
+	var pointerRelativeModeProvider: (() -> Bool)?
 	var pointerButtonTouchSupported = false
 
     public func viewDidLoad() {
@@ -158,13 +163,8 @@ class GamepadController {
 				}
 			mouse.mouseInput?.mouseMovedHandler={[weak self] (_: GCMouseInput, v: Float, v2: Float) in
 				guard let status = self?.pointerInputStatusProvider?(), status.isActive else { return }
-				let pointerHoverSupported: Bool
-				if #available(iOS 13.4, *) {
-					pointerHoverSupported = true
-				} else {
-					pointerHoverSupported = false
-				}
-				guard GCMousePointerMapper.shouldSendRelativeMove(pointerHoverSupported: pointerHoverSupported) else { return }
+				let hostUsesRelativePointer = self?.pointerRelativeModeProvider?() == true
+				guard GCMousePointerMapper.shouldSendRelativeMove(hostUsesRelativePointer: hostUsesRelativePointer) else { return }
 				guard ParsecBackgroundManager.shared.hasActiveConnection else { return }
 				CParsec.sendMouseDelta(Int32(v/1.25 * Float(SettingsHandler.mouseSensitivity)), Int32(-v2/1.25 * Float(SettingsHandler.mouseSensitivity)))
 				}

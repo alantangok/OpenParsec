@@ -77,7 +77,11 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 	private weak var pointerHoverGestureRecognizer: UIHoverGestureRecognizer?
 
 	override var prefersPointerLocked: Bool {
-		return PointerInputGate.prefersPointerLocked
+		guard isViewLoaded else { return false }
+		return PointerInputGate.prefersPointerLocked(
+			hostUsesRelativePointer: hostUsesRelativePointer,
+			status: pointerInputStatus()
+		)
 	}
 
 	override var prefersHomeIndicatorAutoHidden: Bool {
@@ -217,6 +221,9 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		gamePadController.pointerInputStatusProvider = { [weak self] in
 			self?.pointerInputStatus()
 		}
+		gamePadController.pointerRelativeModeProvider = { [weak self] in
+			self?.hostUsesRelativePointer == true
+		}
 		if #available(iOS 13.4, *) {
 			gamePadController.pointerButtonTouchSupported = true
 		}
@@ -332,12 +339,14 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		NotificationCenter.default.addObserver(self, selector: #selector(appDidBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
 		NotificationCenter.default.addObserver(self, selector: #selector(windowDidBecomeKey), name: UIWindow.didBecomeKeyNotification, object: nil)
 		NotificationCenter.default.addObserver(self, selector: #selector(sceneDidActivate), name: UIScene.didActivateNotification, object: nil)
+		NotificationCenter.default.addObserver(self, selector: #selector(pointerModeDidChange), name: .parsecPointerModeDidChange, object: nil)
 	}
 
 	private func stopObservingPointerLifecycle() {
 		NotificationCenter.default.removeObserver(self, name: UIApplication.didBecomeActiveNotification, object: nil)
 		NotificationCenter.default.removeObserver(self, name: UIWindow.didBecomeKeyNotification, object: nil)
 		NotificationCenter.default.removeObserver(self, name: UIScene.didActivateNotification, object: nil)
+		NotificationCenter.default.removeObserver(self, name: .parsecPointerModeDidChange, object: nil)
 	}
 
 	private func refreshPointerInput() {
@@ -353,7 +362,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 	func restorePointerInput() {
 		refreshPointerInput()
 		// Activation can precede the final window state. Refresh again on the next
-		// main-loop turn without requesting a lock that disables hover input.
+		// main-loop turn after UIKit has settled the final focus and pointer-lock state.
 		DispatchQueue.main.async { [weak self] in
 			self?.refreshPointerInput()
 		}
@@ -370,6 +379,10 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 
 	@objc private func sceneDidActivate(_ notification: Notification) {
 		guard let scene = notification.object as? UIScene, scene === view.window?.windowScene else { return }
+		restorePointerInput()
+	}
+
+	@objc private func pointerModeDidChange() {
 		restorePointerInput()
 	}
 
@@ -607,6 +620,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 
 	private func sendAbsolutePointerPosition(_ pointerLocation: CGPoint) {
 		guard ParsecBackgroundManager.shared.hasActiveConnection else { return }
+		guard !hostUsesRelativePointer else { return }
 		let visibleFrame = contentView.convert(contentView.bounds, to: view)
 		guard let hostPosition = PointerPositionMapper.hostPosition(
 			pointerLocation: pointerLocation,
@@ -624,6 +638,10 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 			appIsActive: UIApplication.shared.applicationState == .active,
 			sceneIsForegroundActive: view.window?.windowScene?.activationState == .foregroundActive
 		)
+	}
+
+	private var hostUsesRelativePointer: Bool {
+		return ParsecBackgroundManager.shared.hasActiveConnection && CParsec.mouseInfo.mousePositionRelative
 	}
 
 	@available(iOS 13.4, *)
@@ -1103,7 +1121,6 @@ extension ParsecViewController: UIPointerInteractionDelegate {
 
 	func pointerInteraction(_ inter: UIPointerInteraction, regionFor request: UIPointerRegionRequest, defaultRegion: UIPointerRegion) -> UIPointerRegion? {
 		let loc = request.location
-		sendAbsolutePointerPosition(loc)
 		if let iv = view!.hitTest(loc, with: nil) {
 			let rect = view!.convert(iv.bounds, from: iv)
 			let region = UIPointerRegion(rect: rect, identifier: iv.tag)
@@ -1385,39 +1402,44 @@ final class PointerButtonGestureRecognizer: UIGestureRecognizer {
 			return
 		}
 
-		for button in supportedButtons where event.buttonMask.contains(button) {
-			activeButtons.insert(button)
-			buttonChangedHandler?(button, true)
-		}
+		synchronizeButtons(with: event.buttonMask)
 		state = activeButtons.isEmpty ? .failed : .began
 	}
 
 	override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+		synchronizeButtons(with: event.buttonMask)
 		if state == .began || state == .changed {
 			state = .changed
 		}
 	}
 
 	override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
-		releaseActiveButtons()
-		state = .ended
+		synchronizeButtons(with: event.buttonMask)
+		state = activeButtons.isEmpty ? .ended : .changed
 	}
 
 	override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
-		releaseActiveButtons()
+		synchronizeButtons(with: [])
 		state = .cancelled
 	}
 
 	override func reset() {
-		releaseActiveButtons()
+		activeButtons = []
 		super.reset()
 	}
 
-	private func releaseActiveButtons() {
-		for button in supportedButtons where activeButtons.contains(button) {
-			buttonChangedHandler?(button, false)
+	private func synchronizeButtons(with buttonMask: UIEvent.ButtonMask) {
+		for button in supportedButtons {
+			let wasActive = activeButtons.contains(button)
+			let isActive = buttonMask.contains(button)
+			guard wasActive != isActive else { continue }
+			if isActive {
+				activeButtons.insert(button)
+			} else {
+				activeButtons.remove(button)
+			}
+			buttonChangedHandler?(button, isActive)
 		}
-		activeButtons = []
 	}
 }
 
