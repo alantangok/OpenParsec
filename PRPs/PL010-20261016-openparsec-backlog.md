@@ -86,6 +86,26 @@ Implemented and pushed as `7117aed` on 2026-10-16. The existing worktree is clea
   implementation assigned to Alan. Slide Over/windowed behavior remains a known
   limitation; acceptance does not mean those modes now work.
 
+## Restore/reconnect follow-up (2026-10-20)
+
+- [x] **OPRESTORE-01: Fix restore/reconnect flicker in the selected stable build.**
+  Alan confirmed 1.3.0 build 226 fixed the reported issue. This is user feedback;
+  the earlier source/build checks did not independently prove physical behavior.
+- [x] **OPRESTORE-02: Submit the missing recovery changes against current main.**
+  [PR #121](https://github.com/hugeBlack/OpenParsec/pull/121) is open, based on
+  main `d48788d`, with task commit `976d44e`. It requires sustained health before
+  renewing reconnect/PiP retries and keeps recovery opaque. Thirty-two controlled
+  policy/production-method checks and the unsigned Release device build passed.
+  Existing upstream network detection, renderer, input and settings are retained.
+- [ ] **OPRESTORE-03: Confirm the main/Metal port on a physical iPad.** Stable
+  build 226 confirmation does not establish main/Metal restore/PiP behavior.
+- [ ] **OPRESTORE-04: Follow PR #121 CI and maintainer review.** New CI invokes
+  the recovery regression. [Upstream CI archive and IPA packaging passed](https://github.com/hugeBlack/OpenParsec/actions/runs/39399294520);
+  maintainer review and merge remain pending.
+
+Diagnosis and evidence: `openparsec/20261020-restore-reconnect-flash` in Serena
+memories; private logs under `tmp/restore-recovery-pr-20261020/`.
+
 ## Priority 2: Finish existing scroll follow-up
 
 - [x] **OP97-01: Check for maintainer response or merge on #97.** Merged by
