@@ -24,6 +24,8 @@ class PictureInPictureManager: NSObject {
 	private var glContext: EAGLContext?
 
 	private var cachedFormatDescription: CMVideoFormatDescription?
+	private var displayLayerRecovery = StreamRecoveryBudget()
+	private var displayLayerGaveUp = false
 
 	private(set) var isPiPActive = false
 	private var isSetup = false
@@ -49,6 +51,8 @@ class PictureInPictureManager: NSObject {
 	func setup(sourceView: UIView, glContext: EAGLContext, glkViewController: GLKViewController? = nil) {
 		guard !isSetup else { return }
 		guard AVPictureInPictureController.isPictureInPictureSupported() else { return }
+		displayLayerRecovery.reset()
+		displayLayerGaveUp = false
 
 		self.glContext = glContext
 		self.glkViewController = glkViewController
@@ -260,10 +264,19 @@ class PictureInPictureManager: NSObject {
 	private func feedSampleBuffer() {
 		guard let pixelBuffer = pixelBuffer,
 			  let displayLayer = sampleBufferDisplayLayer else { return }
+		guard !displayLayerGaveUp else { return }
 
 		if displayLayer.status == .failed {
+			displayLayerRecovery.recordFailure()
+			guard displayLayer.requiresFlushToResumeDecoding && !displayLayerRecovery.isExhausted else {
+				handleTerminalDisplayLayerFailure(displayLayer)
+				return
+			}
+			guard displayLayerRecovery.beginAttempt(at: ProcessInfo.processInfo.systemUptime) else { return }
 			displayLayer.flush()
 			cachedFormatDescription = nil
+		} else if displayLayer.status == .rendering {
+			displayLayerRecovery.recordHealthy(at: ProcessInfo.processInfo.systemUptime)
 		}
 		guard displayLayer.isReadyForMoreMediaData else { return }
 
@@ -305,10 +318,23 @@ class PictureInPictureManager: NSObject {
 		displayLayer.enqueue(buffer)
 	}
 
+	private func handleTerminalDisplayLayerFailure(_ displayLayer: AVSampleBufferDisplayLayer) {
+		displayLayerGaveUp = true
+		NSLog("[OpenParsec PiP] Stopping failed display-layer recovery")
+		DispatchQueue.main.async { [weak self, weak displayLayer] in
+			guard let self, let displayLayer,
+				  self.sampleBufferDisplayLayer === displayLayer, self.displayLayerGaveUp else { return }
+			self.stopPiP()
+			self.onPiPStartFailed?()
+		}
+	}
+
 	// MARK: - PiP Control
 
 	func startPiP() {
 		guard isSetup, let controller = pipController, !isPiPActive, !isStarting else { return }
+		displayLayerRecovery.reset()
+		displayLayerGaveUp = false
 
 		isStarting = true
 		attemptStartPiP(controller: controller, retryCount: 0)

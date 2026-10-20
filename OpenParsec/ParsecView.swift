@@ -9,17 +9,18 @@ struct ParsecStatusBar: View {
 	@Binding var showDCAlert: Bool
 	@Binding var DCAlertText: String
 	@Binding var isReconnecting: Bool
-	@State var reconnectStartTime: Date = Date()
+	@Binding var connectionLost: Bool
 	@State var parsecViewController: ParsecViewController?
 	@State var wasDisconnected: Bool = true
 	let timer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 	let onSilentDisconnect: () -> Void
 
-	init(showMenu: Binding<Bool>, showDCAlert: Binding<Bool>, DCAlertText: Binding<String>, parsecViewController: ParsecViewController, isReconnecting: Binding<Bool>, onSilentDisconnect: @escaping () -> Void) {
+	init(showMenu: Binding<Bool>, showDCAlert: Binding<Bool>, DCAlertText: Binding<String>, parsecViewController: ParsecViewController, isReconnecting: Binding<Bool>, connectionLost: Binding<Bool>, onSilentDisconnect: @escaping () -> Void) {
 		_showMenu = showMenu
 		_showDCAlert = showDCAlert
 		_DCAlertText = DCAlertText
 		_isReconnecting = isReconnecting
+		_connectionLost = connectionLost
 		self.parsecViewController = parsecViewController
 		self.onSilentDisconnect = onSilentDisconnect
 	}
@@ -53,16 +54,28 @@ struct ParsecStatusBar: View {
 			return
 		}
 
+		let mgr = ParsecBackgroundManager.shared
+		let now = ProcessInfo.processInfo.systemUptime
 		var pcs = ParsecClientStatus()
-		let status = CParsec.getStatusEx(&pcs)
+		var status = CParsec.getStatusEx(&pcs)
+		connectionLost = status == PARSEC_OK && pcs.networkFailure
+		if status == PARSEC_OK {
+			let needsReconnect = mgr.networkRecovery.needsReconnect(networkFailure: pcs.networkFailure, at: now)
+			if connectionLost {
+				mgr.recoveryBudget.recordFailure()
+				guard needsReconnect else { return }
+				status = NETWORK_ERR_INTERRUPTED
+			}
+		}
 
 		if status != PARSEC_OK {
+			mgr.recoveryBudget.recordFailure()
 			if ParsecBackgroundManager.shared.isMarkedForReconnect {
 				return
 			}
 
 			if status == PARSEC_CONNECTING && isReconnecting {
-				if Date().timeIntervalSince(reconnectStartTime) < 15 {
+				if let started = mgr.recoveryBudget.lastAttemptAt, now - started < 15 {
 					return
 				}
 			}
@@ -83,16 +96,16 @@ struct ParsecStatusBar: View {
 			}
 
 			if SettingsHandler.autoReconnect, !status.isPermanentFailure, let peerId = ParsecBackgroundManager.shared.lastPeerId {
-				let mgr = ParsecBackgroundManager.shared
-				if mgr.reconnectAttempts < 3 {
-					mgr.reconnectAttempts += 1
+				if !mgr.recoveryBudget.isExhausted {
+					guard mgr.recoveryBudget.beginAttempt(at: now) else { return }
+					mgr.networkRecovery.reset()
 					isReconnecting = true
-					reconnectStartTime = Date()
+					connectionLost = false
+					mgr.glkViewController?.isPaused = true
 					parsecViewController?.resetKeyState()
 					CParsec.reconnect(peerId)
 					return
 				}
-				mgr.reconnectAttempts = 0
 				isReconnecting = false
 			}
 
@@ -107,8 +120,9 @@ struct ParsecStatusBar: View {
 			return
 		}
 
+		let stable = mgr.recoveryBudget.recordHealthy(at: now)
 		if isReconnecting {
-			ParsecBackgroundManager.shared.reconnectAttempts = 0
+			guard stable else { return }
 			isReconnecting = false
 			ParsecBackgroundManager.shared.glkViewController?.isPaused = false
 			// SDK forgets stream dims on reconnect, re-send them so the frame fills not corners
@@ -153,6 +167,7 @@ struct ParsecView: View {
 	@State var preferH265: Bool = true
 	@State var constantFps = false
 	@State var isReconnecting: Bool = false
+	@State var connectionLost: Bool = false
 
 	@State var resolutions: [ParsecResolution]
 	@State var bitrates: [Int]
@@ -194,17 +209,17 @@ struct ParsecView: View {
 				.zIndex(1)
 				.prefersPersistentSystemOverlaysHidden()
 
-			ParsecStatusBar(showMenu: $showMenu, showDCAlert: $showDCAlert, DCAlertText: $DCAlertText, parsecViewController: parsecViewController, isReconnecting: $isReconnecting, onSilentDisconnect: { disconnect() })
+			ParsecStatusBar(showMenu: $showMenu, showDCAlert: $showDCAlert, DCAlertText: $DCAlertText, parsecViewController: parsecViewController, isReconnecting: $isReconnecting, connectionLost: $connectionLost, onSilentDisconnect: { disconnect() })
 
-			if isReconnecting {
+			if isReconnecting || connectionLost {
 				VStack(spacing: 12) {
 					ActivityIndicator(isAnimating: .constant(true), style: .large, tint: .white)
-					Text("Reconnecting...")
+					Text(isReconnecting ? "Reconnecting..." : "Connection lost...")
 						.font(.system(size: 16, weight: .medium))
 						.foregroundColor(.white)
 				}
 				.frame(maxWidth: .infinity, maxHeight: .infinity)
-				.background(Color.black.opacity(0.6))
+				.background(Color.black)
 				.zIndex(10)
 			}
 
@@ -376,7 +391,11 @@ struct ParsecView: View {
 					}
 					showDCAlert = false
 					isReconnecting = true
-					ParsecBackgroundManager.shared.reconnectAttempts = 0
+					let mgr = ParsecBackgroundManager.shared
+					mgr.recoveryBudget.reset()
+					_ = mgr.recoveryBudget.beginAttempt(at: ProcessInfo.processInfo.systemUptime)
+					mgr.networkRecovery.reset()
+					mgr.glkViewController?.isPaused = true
 					parsecViewController.resetKeyState()
 					CParsec.reconnect(peerId)
 				  }),
@@ -414,13 +433,13 @@ struct ParsecView: View {
 					ParsecBackgroundManager.shared.isPaused = true
 				} else {
 					parsecViewController.restorePointerInput()
-					if ParsecBackgroundManager.shared.isReconnecting {
+					if isReconnecting || ParsecBackgroundManager.shared.isReconnecting {
 						return
 					}
 					// Check actual Parsec status — timers don't reliably fire in background
 					var pcs = ParsecClientStatus()
 					let currentStatus = CParsec.getStatusEx(&pcs)
-					if currentStatus != PARSEC_OK || ParsecBackgroundManager.shared.isMarkedForReconnect {
+					if currentStatus != PARSEC_OK || pcs.networkFailure || ParsecBackgroundManager.shared.isMarkedForReconnect {
 						CParsec.disconnect()
 						try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
 						ParsecBackgroundManager.shared.markForReconnect()

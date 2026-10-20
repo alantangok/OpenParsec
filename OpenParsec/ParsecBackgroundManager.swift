@@ -14,7 +14,8 @@ class ParsecBackgroundManager {
 	}
 	private var didDisconnectDueToBackground = false
 	private(set) var isReconnecting = false
-	var reconnectAttempts = 0
+	var recoveryBudget = StreamRecoveryBudget()
+	var networkRecovery = StreamNetworkRecovery()
 	var isPaused = false
 	weak var glkViewController: GLKViewController?
 
@@ -42,7 +43,6 @@ class ParsecBackgroundManager {
 		lastPeerId = peerId
 		didDisconnectDueToBackground = false
 		isReconnecting = false
-		reconnectAttempts = 0
 		isPaused = false
 	}
 
@@ -88,6 +88,7 @@ class ParsecBackgroundManager {
 		isReconnecting = false
 		lastPeerId = nil
 		lastHostname = nil
-		reconnectAttempts = 0
+		recoveryBudget.reset()
+		networkRecovery.reset()
 	}
 }
