@@ -575,6 +575,8 @@ struct MainView: View {
 	func connectTo(_ who: IdentifiableHostInfo) {
 		pollTimer?.invalidate()
 		pollTimer = nil
+		ParsecBackgroundManager.shared.recoveryBudget.reset()
+		ParsecBackgroundManager.shared.networkRecovery.reset()
 		CParsec.initialize()
 		connectingToName = who.hostname
 		ParsecBackgroundManager.shared.lastHostname = who.hostname
