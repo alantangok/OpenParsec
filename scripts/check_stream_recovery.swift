@@ -43,6 +43,18 @@ struct CheckStreamRecovery {
 		precondition(network.needsReconnect(networkFailure: true, at: 20))
 		network.reset()
 		precondition(!network.needsReconnect(networkFailure: true, at: 21))
+
+		var restore = StreamRestoreGuard()
+		precondition(!restore.isActive)
+		restore.begin(at: 100)
+		precondition(restore.isActive, "PiP restore must cover the stream before the first poll")
+		restore.expire(at: 119.9)
+		precondition(restore.isActive)
+		restore.expire(at: 120)
+		precondition(!restore.isActive, "A stalled restore must not leave the menu covered forever")
+		restore.begin(at: 200)
+		restore.end()
+		precondition(!restore.isActive)
 		print("Stream recovery regression checks passed")
 	}
 }

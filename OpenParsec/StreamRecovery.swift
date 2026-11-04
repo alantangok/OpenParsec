@@ -37,6 +37,24 @@ struct StreamRecoveryBudget {
 	}
 }
 
+struct StreamRestoreGuard: Equatable {
+	private var deadline: TimeInterval?
+
+	var isActive: Bool { deadline != nil }
+
+	mutating func begin(at time: TimeInterval) {
+		deadline = time + 20
+	}
+
+	mutating func expire(at time: TimeInterval) {
+		if let deadline, time >= deadline { end() }
+	}
+
+	mutating func end() {
+		deadline = nil
+	}
+}
+
 struct StreamNetworkRecovery {
 	private var failureSince: TimeInterval?
 	private var resumedAt: TimeInterval?

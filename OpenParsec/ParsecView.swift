@@ -10,17 +10,19 @@ struct ParsecStatusBar: View {
 	@Binding var DCAlertText: String
 	@Binding var isReconnecting: Bool
 	@Binding var connectionLost: Bool
+	@Binding var restoreGuard: StreamRestoreGuard
 	@State var parsecViewController: ParsecViewController?
 	@State var wasDisconnected: Bool = true
 	let timer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 	let onSilentDisconnect: () -> Void
 
-	init(showMenu: Binding<Bool>, showDCAlert: Binding<Bool>, DCAlertText: Binding<String>, parsecViewController: ParsecViewController, isReconnecting: Binding<Bool>, connectionLost: Binding<Bool>, onSilentDisconnect: @escaping () -> Void) {
+	init(showMenu: Binding<Bool>, showDCAlert: Binding<Bool>, DCAlertText: Binding<String>, parsecViewController: ParsecViewController, isReconnecting: Binding<Bool>, connectionLost: Binding<Bool>, restoreGuard: Binding<StreamRestoreGuard>, onSilentDisconnect: @escaping () -> Void) {
 		_showMenu = showMenu
 		_showDCAlert = showDCAlert
 		_DCAlertText = DCAlertText
 		_isReconnecting = isReconnecting
 		_connectionLost = connectionLost
+		_restoreGuard = restoreGuard
 		self.parsecViewController = parsecViewController
 		self.onSilentDisconnect = onSilentDisconnect
 	}
@@ -56,6 +58,7 @@ struct ParsecStatusBar: View {
 
 		let mgr = ParsecBackgroundManager.shared
 		let now = ProcessInfo.processInfo.systemUptime
+		restoreGuard.expire(at: now)
 		var pcs = ParsecClientStatus()
 		var status = CParsec.getStatusEx(&pcs)
 		connectionLost = status == PARSEC_OK && pcs.networkFailure
@@ -121,6 +124,7 @@ struct ParsecStatusBar: View {
 		}
 
 		let stable = mgr.recoveryBudget.recordHealthy(at: now)
+		if stable { restoreGuard.end() }
 		if isReconnecting {
 			guard stable else { return }
 			isReconnecting = false
@@ -168,6 +172,7 @@ struct ParsecView: View {
 	@State var constantFps = false
 	@State var isReconnecting: Bool = false
 	@State var connectionLost: Bool = false
+	@State var restoreGuard = StreamRestoreGuard()
 
 	@State var resolutions: [ParsecResolution]
 	@State var bitrates: [Int]
@@ -209,12 +214,12 @@ struct ParsecView: View {
 				.zIndex(1)
 				.prefersPersistentSystemOverlaysHidden()
 
-			ParsecStatusBar(showMenu: $showMenu, showDCAlert: $showDCAlert, DCAlertText: $DCAlertText, parsecViewController: parsecViewController, isReconnecting: $isReconnecting, connectionLost: $connectionLost, onSilentDisconnect: { disconnect() })
+			ParsecStatusBar(showMenu: $showMenu, showDCAlert: $showDCAlert, DCAlertText: $DCAlertText, parsecViewController: parsecViewController, isReconnecting: $isReconnecting, connectionLost: $connectionLost, restoreGuard: $restoreGuard, onSilentDisconnect: { disconnect() })
 
-			if isReconnecting || connectionLost {
+			if isReconnecting || connectionLost || restoreGuard.isActive {
 				VStack(spacing: 12) {
 					ActivityIndicator(isAnimating: .constant(true), style: .large, tint: .white)
-					Text(isReconnecting ? "Reconnecting..." : "Connection lost...")
+					Text(isReconnecting || restoreGuard.isActive ? "Reconnecting..." : "Connection lost...")
 						.font(.system(size: 16, weight: .medium))
 						.foregroundColor(.white)
 				}
@@ -448,6 +453,11 @@ struct ParsecView: View {
 						}
 					}
 				}
+			}
+			PictureInPictureManager.shared.onRestoreUserInterface = { [self] in
+				// a stale stream still reports OK for seconds, keep it covered until it proves healthy
+				ParsecBackgroundManager.shared.recoveryBudget.recordFailure()
+				restoreGuard.begin(at: ProcessInfo.processInfo.systemUptime)
 			}
 			PictureInPictureManager.shared.onPiPStartFailed = {
 				if UIApplication.shared.applicationState != .active {
