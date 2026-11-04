@@ -62,6 +62,7 @@ struct ParsecStatusBar: View {
 		var pcs = ParsecClientStatus()
 		var status = CParsec.getStatusEx(&pcs)
 		connectionLost = status == PARSEC_OK && pcs.networkFailure
+		if status != PARSEC_OK || connectionLost { restoreGuard.recordFailure() }
 		if status == PARSEC_OK {
 			let needsReconnect = mgr.networkRecovery.needsReconnect(networkFailure: pcs.networkFailure, at: now)
 			if connectionLost {
@@ -123,8 +124,8 @@ struct ParsecStatusBar: View {
 			return
 		}
 
+		restoreGuard.recordHealthy(at: now)
 		let stable = mgr.recoveryBudget.recordHealthy(at: now)
-		if stable { restoreGuard.end() }
 		if isReconnecting {
 			guard stable else { return }
 			isReconnecting = false
