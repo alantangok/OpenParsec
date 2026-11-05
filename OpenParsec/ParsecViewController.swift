@@ -438,11 +438,13 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 	override func viewWillAppear(_ animated: Bool) {
 		super.viewWillAppear(animated)
 		startObservingInputLifecycle()
+		ClipboardSync.shared.start()
 	}
 
 	override func viewWillDisappear(_ animated: Bool) {
 		super.viewWillDisappear(animated)
 		stopMomentum()
+		ClipboardSync.shared.stop()
 		if let parent = parent {
 			parent.setChildForHomeIndicatorAutoHidden(nil)
 			parent.setChildViewControllerForPointerLock(nil)
